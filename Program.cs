@@ -113,7 +113,7 @@ foreach (var vt in 小選挙区出力内容Dic)
         foreach (var resp in kv.Value)
         {
             strBldr.AppendLine("<li><ol><li><dl>");
-            strBldr.AppendLine($"<li class='kohosya-name'>{resp.Name}<span>（{resp.NameFurigana}）</span> ：\u3000<span>{resp.PartyName}</span></li>");
+            strBldr.AppendLine($"<li class='kohosya-name'>{(resp.Result == "当選" ? "\ud83c\udf38 " : string.Empty)}{resp.Name}<span>（{resp.NameFurigana}）</span> ：\u3000<span>{resp.PartyName}</span></li>");
             strBldr.AppendLine($"<li class='setsumon'><b>設問（1-a）：</b><br>{resp.Q1Answer}</li>");
             strBldr.AppendLine($"<li class='setsumon'><b>設問（1-b）：</b><br>{resp.Q1Reason}</li>");
             strBldr.AppendLine($"<li class='setsumon'><b>設問（2-a）：</b><br>{resp.Q2Answer}</li>");
@@ -169,7 +169,7 @@ foreach (var kv in 比例ブロック出力内容Dic)
     foreach (var resp in kv.Value)
     {
         strBldr.AppendLine("<li><ol><li><dl>");
-        strBldr.AppendLine($"<li class='kohosya-name'>{resp.Name}<span>（{resp.NameFurigana}）</span> ：\u3000<span>{resp.PartyName}</span></li>");
+        strBldr.AppendLine($"<li class='kohosya-name'>{(resp.Result == "当選" ? "\ud83c\udf38 " : string.Empty)}{resp.Name}<span>（{resp.NameFurigana}）</span> ：\u3000<span>{resp.PartyName}</span></li>");
         strBldr.AppendLine($"<li class='setsumon'><b>設問（1-a）：</b><br>{resp.Q1Answer}</li>");
         strBldr.AppendLine($"<li class='setsumon'><b>設問（1-b）：</b><br>{resp.Q1Reason}</li>");
         strBldr.AppendLine($"<li class='setsumon'><b>設問（2-a）：</b><br>{resp.Q2Answer}</li>");
