@@ -33,5 +33,8 @@ namespace ElectionPageCreateTool.Model
 
         [JsonPropertyName("好きなマンガ・アニメ・ゲームがありましたら教えてください（最大3つ、100文字以内）")]
         public string FavoriteMangaAnimeGame { get; set; }
+
+        [JsonPropertyName("当落")] 
+        public string Result { get; set; } = string.Empty;
     }
 }
