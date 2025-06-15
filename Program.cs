@@ -43,13 +43,18 @@ string json;
 
         jsonList.Add(jsonEntry);
     }
-
-    json = JsonSerializer.Serialize(jsonList);
+    var options = new JsonSerializerOptions
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        WriteIndented = true
+    };
+    json = JsonSerializer.Serialize(jsonList, options);
 }
 
 File.WriteAllText(Path.Combine(directoryPath, $"{DateTime.Now:yyyyMMddhhmmss}.json"), json);
 
-Shuinsen2024Logic.GenerateShuinsen2024(json, directoryPath);
+// Shuinsen2024Logic.GenerateShuinsen2024(json, directoryPath);
+Togisen2025Logic.Generate(json, directoryPath);
 
 Console.WriteLine("出力が完了しました。何か入力するとプログラムが終了します。");
 Console.ReadKey();
