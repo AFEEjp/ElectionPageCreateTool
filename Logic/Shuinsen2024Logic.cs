@@ -2,6 +2,7 @@
 using System.Text.Json;
 using ElectionPageCreateTool.Extensions;
 using ElectionPageCreateTool.Model;
+using ElectionPageCreateTool.Model.Shuinsen2024;
 
 namespace ElectionPageCreateTool.Logic;
 

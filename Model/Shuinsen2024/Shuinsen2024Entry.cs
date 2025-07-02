@@ -1,4 +1,4 @@
-﻿namespace ElectionPageCreateTool.Model
+﻿namespace ElectionPageCreateTool.Model.Shuinsen2024
 {
     public class Shuinsen2024PrefEntry
     {

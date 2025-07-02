@@ -1,7 +1,7 @@
 ﻿using System.Text;
 using System.Text.Json;
 using ElectionPageCreateTool.Extensions;
-using ElectionPageCreateTool.Model;
+using ElectionPageCreateTool.Model.Togisen2025;
 
 namespace ElectionPageCreateTool.Logic;
 

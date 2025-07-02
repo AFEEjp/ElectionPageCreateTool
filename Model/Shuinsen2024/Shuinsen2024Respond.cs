@@ -1,6 +1,6 @@
 ﻿using System.Text.Json.Serialization;
 
-namespace ElectionPageCreateTool.Model
+namespace ElectionPageCreateTool.Model.Shuinsen2024
 {
     public class Shuinsen2024Respond
     {
@@ -34,7 +34,7 @@ namespace ElectionPageCreateTool.Model
         [JsonPropertyName("好きなマンガ・アニメ・ゲームがありましたら教えてください（最大3つ、100文字以内）")]
         public string FavoriteMangaAnimeGame { get; set; }
 
-        [JsonPropertyName("当落")] 
+        [JsonPropertyName("当落")]
         public string Result { get; set; } = string.Empty;
     }
 }
