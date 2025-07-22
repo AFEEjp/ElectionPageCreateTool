@@ -1,7 +1,7 @@
 ﻿using System.Text;
 using System.Text.Json;
 using ElectionPageCreateTool.Extensions;
-using ElectionPageCreateTool.Model;
+using ElectionPageCreateTool.Model.Togisen2025;
 
 namespace ElectionPageCreateTool.Logic;
 
@@ -138,7 +138,7 @@ public static class Togisen2025Logic
 
 
 
-    public static string ModifyQ1Answer(this string q1Answer)
+    private static string ModifyQ1Answer(this string q1Answer)
     {
         // 特定の回答を修正
         return q1Answer switch
@@ -151,7 +151,7 @@ public static class Togisen2025Logic
     }
 
 
-    public static string ModifyQ2Answer(this string q2Answer)
+    private static string ModifyQ2Answer(this string q2Answer)
     {
         // 特定の回答を修正
         return q2Answer switch
