@@ -3,7 +3,7 @@ using System.Text.Json;
 using ElectionPageCreateTool.Extensions;
 using ElectionPageCreateTool.Model.Saninsen2025;
 
-namespace ElectionPageCreateTool.Logic;
+namespace ElectionPageCreateTool.Logic.ElectionLogic;
 
 public static class Saninsen2025Logic
 {
