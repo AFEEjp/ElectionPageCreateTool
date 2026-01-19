@@ -6,6 +6,7 @@ Console.WriteLine("どの選挙のロジックを実行しますか？");
 Console.WriteLine("1. 2024衆院選");
 Console.WriteLine("2. 2025都議選");
 Console.WriteLine("3. 2025参院選");
+Console.WriteLine("4. 2026衆院選");
 var electionChoice = Console.ReadLine();
 
 switch (electionChoice)
@@ -20,6 +21,10 @@ switch (electionChoice)
         break;
     case "3":
         Saninsen2025Logic.MainLogic();
+
+        break;
+    case "4":
+        Shuinsen2026Logic.MainLogic();
 
         break;
     default:

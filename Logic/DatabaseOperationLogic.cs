@@ -8,7 +8,6 @@ namespace ElectionPageCreateTool.Logic
     public class DatabaseOperationLogic
     {
         private readonly string _dbFilePath;
-        private readonly string _tableName;
 
         /// <summary>
         /// コンストラクタ - appsettings.jsonから設定を読み込む
@@ -22,9 +21,6 @@ namespace ElectionPageCreateTool.Logic
 
             _dbFilePath = configuration["DatabaseSettings:DbFilePath"]
                 ?? throw new InvalidOperationException("DatabaseSettings:DbFilePath is not configured in appsettings.json");
-
-            _tableName = configuration["DatabaseSettings:TableName"]
-                ?? throw new InvalidOperationException("DatabaseSettings:TableName is not configured in appsettings.json");
         }
 
         /// <summary>
@@ -122,8 +118,23 @@ namespace ElectionPageCreateTool.Logic
         /// </summary>
         private void CreateTable(SQLiteConnection connection, string tableName, List<string> columnNames)
         {
+            // テーブルの存在チェック
+            var tableExistsSql = $"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=@tableName";
+            using (var checkCommand = connection.CreateCommand())
+            {
+                checkCommand.CommandText = tableExistsSql;
+                checkCommand.Parameters.Add(new SQLiteParameter("@tableName", tableName));
+                var exists = Convert.ToInt32(checkCommand.ExecuteScalar()) > 0;
+
+                if (exists)
+                {
+                    return;
+                }
+            }
+
+            // テーブルが存在しない場合のみ作成
             var columns = string.Join(", ", columnNames.Select(c => $"[{c}] TEXT"));
-            var createTableSql = $"CREATE TABLE IF NOT EXISTS [{tableName}] (id INTEGER PRIMARY KEY AUTOINCREMENT, {columns}, created_at TEXT, updated_at TEXT)";
+            var createTableSql = $"CREATE TABLE [{tableName}] (id INTEGER PRIMARY KEY AUTOINCREMENT, {columns}, created_at TEXT, updated_at TEXT)";
 
             using var command = connection.CreateCommand();
             command.CommandText = createTableSql;
@@ -325,6 +336,51 @@ namespace ElectionPageCreateTool.Logic
         }
 
         /// <summary>
+        /// SQLiteからデータを取得してモデルクラスのリストとして返す
+        /// </summary>
+        /// <typeparam name="T">モデルクラス</typeparam>
+        /// <param name="tableName">テーブル名</param>
+        /// <returns>モデルクラスのリスト</returns>
+        public List<T> GetAllData<T>(string tableName) where T : class, new()
+        {
+            if (string.IsNullOrWhiteSpace(tableName))
+            {
+                throw new ArgumentException("テーブル名を指定してください。", nameof(tableName));
+            }
+
+            var result = new List<T>();
+            var properties = typeof(T).GetProperties()
+                .Where(p => p.GetCustomAttribute<ExcelColumnAttribute>() != null)
+                .ToList();
+
+            using var connection = new SQLiteConnection(GetConnectionString());
+            connection.Open();
+
+            // カラム名のリストを取得（プロパティ名がカラム名）
+            var columnNames = properties.Select(p => p.Name).ToList();
+            var selectColumns = string.Join(", ", columnNames.Select(c => $"[{c}]"));
+            var selectSql = $"SELECT {selectColumns} FROM [{tableName}]";
+
+            using var command = connection.CreateCommand();
+            command.CommandText = selectSql;
+
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                var item = new T();
+                for (int i = 0; i < properties.Count; i++)
+                {
+                    var value = reader.IsDBNull(i) ? string.Empty : reader.GetString(i);
+                    properties[i].SetValue(item, value);
+                }
+                result.Add(item);
+            }
+
+            Console.WriteLine($"テーブル '{tableName}' から {result.Count} 件のデータを取得しました。");
+            return result;
+        }
+
+        /// <summary>
         /// モデルクラスのカラムマッピング設定を表示
         /// </summary>
         public void ShowColumnMappings<T>() where T : class
@@ -357,14 +413,6 @@ namespace ElectionPageCreateTool.Logic
         public string GetDbFilePath()
         {
             return _dbFilePath;
-        }
-
-        /// <summary>
-        /// テーブル名を取得
-        /// </summary>
-        public string GetTableName()
-        {
-            return _tableName;
         }
 
         /// <summary>

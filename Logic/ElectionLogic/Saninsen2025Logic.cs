@@ -34,11 +34,12 @@ public static class Saninsen2025Logic
                     Console.WriteLine($"Excelから {dic.Count} 件のデータを読み込みました。");
 
                     var dbLogic = new DatabaseOperationLogic();
+                    var tableName = nameof(Saninsen2025Respond);
                     Console.WriteLine($"データベースファイル: {dbLogic.GetDbFilePath()}");
-                    Console.WriteLine($"テーブル名: {dbLogic.GetTableName()}");
+                    Console.WriteLine($"テーブル名: {tableName}");
                     dbLogic.ShowUpsertKeyColumns<Saninsen2025Respond>();
 
-                    dbLogic.UpsertDataToSQLite<Saninsen2025Respond>(dbLogic.GetTableName(), dic);
+                    dbLogic.UpsertDataToSQLite<Saninsen2025Respond>(tableName, dic);
                 }
                 break;
 
