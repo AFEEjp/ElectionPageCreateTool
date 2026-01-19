@@ -36,9 +36,9 @@ public static class Saninsen2025Logic
                     var dbLogic = new DatabaseOperationLogic();
                     Console.WriteLine($"データベースファイル: {dbLogic.GetDbFilePath()}");
                     Console.WriteLine($"テーブル名: {dbLogic.GetTableName()}");
-                    dbLogic.ShowUpsertKeyColumns();
+                    dbLogic.ShowUpsertKeyColumns<Saninsen2025Respond>();
 
-                    dbLogic.UpsertDataToSQLite(dbLogic.GetTableName(), dic);
+                    dbLogic.UpsertDataToSQLite<Saninsen2025Respond>(dbLogic.GetTableName(), dic);
                 }
                 break;
 

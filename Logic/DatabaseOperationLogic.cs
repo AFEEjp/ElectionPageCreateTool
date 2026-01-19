@@ -1,4 +1,6 @@
 using System.Data.SQLite;
+using System.Reflection;
+using ElectionPageCreateTool.Attributes;
 using Microsoft.Extensions.Configuration;
 
 namespace ElectionPageCreateTool.Logic
@@ -7,8 +9,6 @@ namespace ElectionPageCreateTool.Logic
     {
         private readonly string _dbFilePath;
         private readonly string _tableName;
-        private readonly Dictionary<string, string> _columnMappings;
-        private readonly List<string> _upsertKeyColumns;
 
         /// <summary>
         /// コンストラクタ - appsettings.jsonから設定を読み込む
@@ -25,16 +25,6 @@ namespace ElectionPageCreateTool.Logic
 
             _tableName = configuration["DatabaseSettings:TableName"]
                 ?? throw new InvalidOperationException("DatabaseSettings:TableName is not configured in appsettings.json");
-
-            _columnMappings = configuration.GetSection("ColumnMappings")
-                .GetChildren()
-                .ToDictionary(x => x.Key, x => x.Value ?? x.Key);
-
-            _upsertKeyColumns = configuration.GetSection("UpsertKeyColumns")
-                .GetChildren()
-                .Select(x => x.Value ?? "")
-                .Where(x => !string.IsNullOrEmpty(x))
-                .ToList();
         }
 
         /// <summary>
@@ -46,69 +36,38 @@ namespace ElectionPageCreateTool.Logic
         }
 
         /// <summary>
-        /// ExcelデータをSQLiteに追加
+        /// モデルクラスからカラムマッピング情報を取得
         /// </summary>
-        /// <param name="tableName">テーブル名</param>
-        /// <param name="data">Excelから変換されたDictionaryデータ</param>
-        /// <param name="dropIfExists">既存テーブルを削除するかどうか</param>
-        public void InsertDataToSQLite(string tableName, List<Dictionary<string, string>> data, bool dropIfExists = false)
+        private static ColumnMappingInfo GetColumnMappingInfo<T>()
         {
-            if (string.IsNullOrWhiteSpace(tableName))
-            {
-                throw new ArgumentException("テーブル名を指定してください。", nameof(tableName));
-            }
-
-            if (data == null || data.Count == 0)
-            {
-                throw new ArgumentException("挿入するデータがありません。", nameof(data));
-            }
-
-            // データの最初の行からキーを取得してカラムを決定
-            var excelKeys = data[0].Keys.ToList();
-
-            // カラムマッピングを適用（マッピングがない場合はExcelのキー名をそのまま使用）
-            var columnDefinitions = excelKeys
-                .Select(key => _columnMappings.TryGetValue(key, out var mappedName) ? mappedName : key)
+            var properties = typeof(T).GetProperties()
+                .Where(p => p.GetCustomAttribute<ExcelColumnAttribute>() != null)
                 .ToList();
 
-            using var connection = new SQLiteConnection(GetConnectionString());
-            connection.Open();
+            var mappings = new Dictionary<string, string>();
+            var upsertKeys = new List<(string excelHeader, string columnName, bool isFurigana)>();
 
-            using var transaction = connection.BeginTransaction();
-
-            try
+            foreach (var prop in properties)
             {
-                // 既存テーブルの削除（オプション）
-                if (dropIfExists)
+                var attr = prop.GetCustomAttribute<ExcelColumnAttribute>()!;
+                mappings[attr.HeaderName] = prop.Name;
+
+                if (attr.IsUpsertKey)
                 {
-                    var dropCommand = connection.CreateCommand();
-                    dropCommand.CommandText = $"DROP TABLE IF EXISTS [{tableName}]";
-                    dropCommand.ExecuteNonQuery();
-                    Console.WriteLine($"既存のテーブル '{tableName}' を削除しました。");
+                    upsertKeys.Add((attr.HeaderName, prop.Name, attr.IsFurigana));
                 }
-
-                // テーブル作成（created_at, updated_at付き）
-                CreateTable(connection, tableName, columnDefinitions);
-
-                // データ挿入
-                var insertedCount = InsertData(connection, tableName, data, excelKeys, columnDefinitions);
-
-                transaction.Commit();
-                Console.WriteLine($"テーブル '{tableName}' に {insertedCount} 件のデータを挿入しました。");
             }
-            catch (Exception)
-            {
-                transaction.Rollback();
-                throw;
-            }
+
+            return new ColumnMappingInfo(mappings, upsertKeys);
         }
 
         /// <summary>
-        /// ExcelデータをSQLiteに追加または更新（Upsert）
+        /// ExcelデータをSQLiteに追加または更新（Upsert）- モデルクラス指定版（テーブル名指定）
         /// </summary>
+        /// <typeparam name="T">モデルクラス</typeparam>
         /// <param name="tableName">テーブル名</param>
         /// <param name="data">Excelから変換されたDictionaryデータ</param>
-        public void UpsertDataToSQLite(string tableName, List<Dictionary<string, string>> data)
+        public void UpsertDataToSQLite<T>(string tableName, List<Dictionary<string, string>> data) where T : class
         {
             if (string.IsNullOrWhiteSpace(tableName))
             {
@@ -120,9 +79,11 @@ namespace ElectionPageCreateTool.Logic
                 throw new ArgumentException("挿入するデータがありません。", nameof(data));
             }
 
-            if (_upsertKeyColumns.Count == 0)
+            var mappingInfo = GetColumnMappingInfo<T>();
+
+            if (mappingInfo.UpsertKeys.Count == 0)
             {
-                throw new InvalidOperationException("UpsertKeyColumnsが設定されていません。appsettings.jsonを確認してください。");
+                throw new InvalidOperationException($"モデルクラス {typeof(T).Name} にUpsertKeyが設定されていません。ExcelColumnAttributeのIsUpsertKey=trueを設定してください。");
             }
 
             // データの最初の行からキーを取得してカラムを決定
@@ -130,7 +91,7 @@ namespace ElectionPageCreateTool.Logic
 
             // カラムマッピングを適用（マッピングがない場合はExcelのキー名をそのまま使用）
             var columnDefinitions = excelKeys
-                .Select(key => _columnMappings.TryGetValue(key, out var mappedName) ? mappedName : key)
+                .Select(key => mappingInfo.ColumnMappings.TryGetValue(key, out var mappedName) ? mappedName : key)
                 .ToList();
 
             using var connection = new SQLiteConnection(GetConnectionString());
@@ -144,7 +105,7 @@ namespace ElectionPageCreateTool.Logic
                 CreateTable(connection, tableName, columnDefinitions);
 
                 // データをUpsert
-                var (insertedCount, updatedCount, skippedCount) = UpsertData(connection, tableName, data, excelKeys, columnDefinitions);
+                var (insertedCount, updatedCount, skippedCount) = UpsertData(connection, tableName, data, excelKeys, columnDefinitions, mappingInfo);
 
                 transaction.Commit();
                 Console.WriteLine($"テーブル '{tableName}' に {insertedCount} 件を追加、{updatedCount} 件を更新、{skippedCount} 件をスキップしました。");
@@ -172,66 +133,20 @@ namespace ElectionPageCreateTool.Logic
         }
 
         /// <summary>
-        /// データを挿入
-        /// </summary>
-        private int InsertData(SQLiteConnection connection, string tableName,
-            List<Dictionary<string, string>> data, List<string> excelKeys, List<string> columnNames)
-        {
-            var allColumns = columnNames.Concat(new[] { "created_at", "updated_at" }).ToList();
-            var parameterNames = allColumns.Select((_, i) => $"@p{i}").ToList();
-            var insertSql = $"INSERT INTO [{tableName}] ([{string.Join("], [", allColumns)}]) VALUES ({string.Join(", ", parameterNames)})";
-
-            using var command = connection.CreateCommand();
-            command.CommandText = insertSql;
-
-            // パラメータを事前に作成
-            for (int i = 0; i < allColumns.Count; i++)
-            {
-                command.Parameters.Add(new SQLiteParameter($"@p{i}"));
-            }
-
-            var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-            int insertedCount = 0;
-
-            foreach (var row in data)
-            {
-                // 各行のデータをパラメータに設定
-                for (int i = 0; i < excelKeys.Count; i++)
-                {
-                    command.Parameters[$"@p{i}"].Value = row.TryGetValue(excelKeys[i], out var value) ? value : (object)DBNull.Value;
-                }
-                // created_at, updated_at
-                command.Parameters[$"@p{excelKeys.Count}"].Value = now;
-                command.Parameters[$"@p{excelKeys.Count + 1}"].Value = now;
-
-                command.ExecuteNonQuery();
-                insertedCount++;
-            }
-
-            return insertedCount;
-        }
-
-        /// <summary>
         /// データをUpsert（追加または更新）
         /// </summary>
         private (int insertedCount, int updatedCount, int skippedCount) UpsertData(SQLiteConnection connection, string tableName,
-            List<Dictionary<string, string>> data, List<string> excelKeys, List<string> columnNames)
+            List<Dictionary<string, string>> data, List<string> excelKeys, List<string> columnNames, ColumnMappingInfo mappingInfo)
         {
-            int insertedCount = 0;
-            int updatedCount = 0;
-            int skippedCount = 0;
+            var insertedCount = 0;
+            var updatedCount = 0;
+            var skippedCount = 0;
             var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-
-            // キーカラムのExcelキー名とDBカラム名を取得
-            var keyExcelColumns = _upsertKeyColumns;
-            var keyDbColumns = keyExcelColumns
-                .Select(key => _columnMappings.TryGetValue(key, out var mappedName) ? mappedName : key)
-                .ToList();
 
             foreach (var row in data)
             {
                 // 既存レコードを検索（データも取得）
-                var existingRecord = FindExistingRecordWithData(connection, tableName, row, keyExcelColumns, keyDbColumns, columnNames);
+                var existingRecord = FindExistingRecordWithData(connection, tableName, row, columnNames, mappingInfo);
 
                 if (existingRecord.HasValue)
                 {
@@ -243,8 +158,8 @@ namespace ElectionPageCreateTool.Logic
                         updatedCount++;
 
                         // 更新された項目を表示
-                        var keyValues = keyExcelColumns
-                            .Select(key => row.TryGetValue(key, out var v) ? v : "")
+                        var keyValues = mappingInfo.UpsertKeys
+                            .Select(k => row.TryGetValue(k.excelHeader, out var v) ? v : "")
                             .ToList();
                         Console.WriteLine($"  [更新] {string.Join(" / ", keyValues)}");
                     }
@@ -271,13 +186,13 @@ namespace ElectionPageCreateTool.Logic
         private bool HasChanges(Dictionary<string, string> excelRow, Dictionary<string, string> dbRow,
             List<string> excelKeys, List<string> columnNames)
         {
-            for (int i = 0; i < excelKeys.Count; i++)
+            for (var i = 0; i < excelKeys.Count; i++)
             {
                 var excelKey = excelKeys[i];
                 var dbColumn = columnNames[i];
 
-                var excelValue = excelRow.TryGetValue(excelKey, out var ev) ? ev ?? "" : "";
-                var dbValue = dbRow.TryGetValue(dbColumn, out var dv) ? dv ?? "" : "";
+                var excelValue = excelRow.GetValueOrDefault(excelKey, "");
+                var dbValue = dbRow.GetValueOrDefault(dbColumn, "");
 
                 if (excelValue != dbValue)
                 {
@@ -288,32 +203,31 @@ namespace ElectionPageCreateTool.Logic
         }
 
         /// <summary>
-        /// 既存レコードを検索してデータも取得（ふりがなはスペース除去して比較）
+        /// 既存レコードを検索してデータも取得
         /// </summary>
         private (long id, Dictionary<string, string> data)? FindExistingRecordWithData(SQLiteConnection connection, string tableName,
-            Dictionary<string, string> row, List<string> keyExcelColumns, List<string> keyDbColumns, List<string> columnNames)
+            Dictionary<string, string> row, List<string> columnNames, ColumnMappingInfo mappingInfo)
         {
             var whereConditions = new List<string>();
             var parameters = new List<SQLiteParameter>();
 
-            for (int i = 0; i < keyExcelColumns.Count; i++)
+            for (int i = 0; i < mappingInfo.UpsertKeys.Count; i++)
             {
-                var excelKey = keyExcelColumns[i];
-                var dbColumn = keyDbColumns[i];
+                var (excelHeader, columnName, isFurigana) = mappingInfo.UpsertKeys[i];
 
-                if (row.TryGetValue(excelKey, out var value))
+                if (row.TryGetValue(excelHeader, out var value))
                 {
                     // ふりがなカラムの場合はスペースを除去して比較
-                    if (excelKey.Contains("ふりがな"))
+                    if (isFurigana)
                     {
                         var normalizedValue = NormalizeForComparison(value);
-                        whereConditions.Add($"REPLACE(REPLACE([{dbColumn}], ' ', ''), '　', '') = @key{i}");
+                        whereConditions.Add($"REPLACE(REPLACE([{columnName}], ' ', ''), '　', '') = @key{i}");
                         parameters.Add(new SQLiteParameter($"@key{i}", normalizedValue));
                     }
                     else
                     {
-                        whereConditions.Add($"[{dbColumn}] = @key{i}");
-                        parameters.Add(new SQLiteParameter($"@key{i}", value ?? (object)DBNull.Value));
+                        whereConditions.Add($"[{columnName}] = @key{i}");
+                        parameters.Add(new SQLiteParameter($"@key{i}", value));
                     }
                 }
             }
@@ -411,27 +325,29 @@ namespace ElectionPageCreateTool.Logic
         }
 
         /// <summary>
-        /// 現在のカラムマッピング設定を表示
+        /// モデルクラスのカラムマッピング設定を表示
         /// </summary>
-        public void ShowColumnMappings()
+        public void ShowColumnMappings<T>() where T : class
         {
-            Console.WriteLine("現在のカラムマッピング設定:");
-            foreach (var mapping in _columnMappings)
+            var mappingInfo = GetColumnMappingInfo<T>();
+            Console.WriteLine($"カラムマッピング設定 ({typeof(T).Name}):");
+            foreach (var mapping in mappingInfo.ColumnMappings)
             {
                 Console.WriteLine($"  {mapping.Key} -> {mapping.Value}");
             }
         }
 
         /// <summary>
-        /// 現在のUpsertキーカラム設定を表示
+        /// モデルクラスのUpsertキーカラム設定を表示
         /// </summary>
-        public void ShowUpsertKeyColumns()
+        public void ShowUpsertKeyColumns<T>() where T : class
         {
-            Console.WriteLine("更新判定に使用するキーカラム:");
-            foreach (var col in _upsertKeyColumns)
+            var mappingInfo = GetColumnMappingInfo<T>();
+            Console.WriteLine($"更新判定に使用するキーカラム ({typeof(T).Name}):");
+            foreach (var (excelHeader, columnName, isFurigana) in mappingInfo.UpsertKeys)
             {
-                var dbCol = _columnMappings.TryGetValue(col, out var mapped) ? mapped : col;
-                Console.WriteLine($"  {col} -> {dbCol}");
+                var suffix = isFurigana ? " [ふりがな]" : "";
+                Console.WriteLine($"  {excelHeader} -> {columnName}{suffix}");
             }
         }
 
@@ -450,5 +366,13 @@ namespace ElectionPageCreateTool.Logic
         {
             return _tableName;
         }
+
+        /// <summary>
+        /// カラムマッピング情報を保持するレコード
+        /// </summary>
+        private record ColumnMappingInfo(
+            Dictionary<string, string> ColumnMappings,
+            List<(string excelHeader, string columnName, bool isFurigana)> UpsertKeys
+        );
     }
 }
