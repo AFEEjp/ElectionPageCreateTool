@@ -11,6 +11,8 @@ namespace ElectionPageCreateTool.Logic
         /// <returns>JSON文字列</returns>
         public List<Dictionary<string, string>> ConvertExcelToDictionary(string filePath)
         {
+            filePath = NormalizeExplorerCopiedPath(filePath);
+
             try
             {
                 using var workbook = new XLWorkbook(filePath);
@@ -168,6 +170,21 @@ namespace ElectionPageCreateTool.Logic
             }
 
             return headers;
+        }
+
+
+        static string NormalizeExplorerCopiedPath(string? input)
+        {
+            if (string.IsNullOrWhiteSpace(input))
+                return string.Empty;
+
+            var s = input.Trim();
+
+            // 先頭末尾が " で囲まれている場合のみ外す
+            if (s is ['"', _, ..] && s[^1] == '"')
+                s = s[1..^1];
+
+            return s;
         }
     }
 }

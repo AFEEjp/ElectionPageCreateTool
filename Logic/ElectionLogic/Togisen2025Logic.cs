@@ -9,6 +9,22 @@ public static class Togisen2025Logic
 {
     public static readonly DateTime NoticeDate = new DateTime(2025, 6, 13);
 
+    public static void MainLogic()
+    {
+        Console.Clear();
+        Console.WriteLine("過去の選挙用ロジックを実行します。");
+        var (json, directoryPath) = TsvFileConvert.ConvertToJson();
+
+        if (string.IsNullOrEmpty(json) || string.IsNullOrEmpty(directoryPath))
+        {
+            Console.WriteLine("JSONの生成に失敗しました。プログラムを終了します。");
+            return;
+        }
+
+        Generate(json, directoryPath);
+    }
+
+
     public static void Generate(string json, string directoryPath)
     {
         // JSONをクラスのリストにパース

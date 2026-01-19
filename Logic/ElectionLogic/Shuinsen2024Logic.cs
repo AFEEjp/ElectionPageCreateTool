@@ -8,6 +8,21 @@ namespace ElectionPageCreateTool.Logic.ElectionLogic;
 
 public class Shuinsen2024Logic
 {
+    public static void MainLogic()
+    {
+        Console.Clear();
+        Console.WriteLine("過去の選挙用ロジックを実行します。");
+        var (json, directoryPath) = TsvFileConvert.ConvertToJson();
+
+        if (string.IsNullOrEmpty(json) || string.IsNullOrEmpty(directoryPath))
+        {
+            Console.WriteLine("JSONの生成に失敗しました。プログラムを終了します。");
+            return;
+        }
+
+        GenerateShuinsen2024(json, directoryPath);
+    }
+
     public static void GenerateShuinsen2024(string json, string directoryPath)
     {
         // JSONをクラスのリストにパース
