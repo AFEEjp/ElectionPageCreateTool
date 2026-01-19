@@ -3,11 +3,75 @@ using System.Text.Json;
 using ElectionPageCreateTool.Extensions;
 using ElectionPageCreateTool.Model.Saninsen2025;
 
-namespace ElectionPageCreateTool.Logic;
+namespace ElectionPageCreateTool.Logic.ElectionLogic;
 
 public static class Saninsen2025Logic
 {
     public static readonly DateTime NoticeDate = new DateTime(2025, 7, 3);
+
+    public static void MainLogic()
+    {
+        Console.Clear();
+
+        var excelOperationLogic = new ExcelOperationLogic();
+
+        Console.WriteLine("処理を選択してください:");
+        Console.WriteLine("1. ExcelファイルをSQLiteに保存");
+        Console.WriteLine("2. 選挙結果Excelファイルをマージ");
+        Console.WriteLine("3. サイト生成");
+
+        var choice = Console.ReadLine();
+
+        switch (choice)
+        {
+            case "1":
+                Console.WriteLine("Excelファイルのパスを入力してください:");
+                var excelPath = Console.ReadLine();
+                if (!string.IsNullOrEmpty(excelPath))
+                {
+                    var dic = excelOperationLogic.ConvertExcelToDictionary(excelPath);
+
+                    Console.WriteLine($"Excelから {dic.Count} 件のデータを読み込みました。");
+
+                    var dbLogic = new DatabaseOperationLogic();
+                    Console.WriteLine($"データベースファイル: {dbLogic.GetDbFilePath()}");
+                    Console.WriteLine($"テーブル名: {dbLogic.GetTableName()}");
+                    dbLogic.ShowUpsertKeyColumns<Saninsen2025Respond>();
+
+                    dbLogic.UpsertDataToSQLite<Saninsen2025Respond>(dbLogic.GetTableName(), dic);
+                }
+                break;
+
+            case "2":
+                Console.WriteLine("メインExcelファイル（アンケート結果）のパスを入力してください:");
+                var mainFilePath = Console.ReadLine();
+                Console.WriteLine("結果Excelファイル（当落情報）のパスを入力してください:");
+                var resultFilePath = Console.ReadLine();
+                Console.WriteLine("出力ファイルパスを入力してください（空白の場合は自動生成）:");
+                var outputPath = Console.ReadLine();
+
+                if (!string.IsNullOrEmpty(mainFilePath) && !string.IsNullOrEmpty(resultFilePath))
+                {
+                    excelOperationLogic.MergeElectionResultExcel(mainFilePath, resultFilePath, outputPath);
+                }
+
+                break;
+
+            case "3":
+                Console.WriteLine("過去の選挙用ロジックを実行します。");
+                var (json, directoryPath) = TsvFileConvert.ConvertToJson();
+
+                if (string.IsNullOrEmpty(json) || string.IsNullOrEmpty(directoryPath))
+                {
+                    Console.WriteLine("JSONの生成に失敗しました。プログラムを終了します。");
+                    return;
+                }
+
+                GenerateSaninsen2025(json, directoryPath);
+                break;
+        }
+
+    }
 
     public static void GenerateSaninsen2025(string json, string directoryPath)
     {

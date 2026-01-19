@@ -1,20 +1,31 @@
-﻿using ElectionPageCreateTool;
-using ElectionPageCreateTool.Logic;
+﻿using ElectionPageCreateTool.Logic.ElectionLogic;
 
 
-var (json, directoryPath) = TsvFileConvert.ConvertToJson();
 
-if (string.IsNullOrEmpty(json) || string.IsNullOrEmpty(directoryPath))
+Console.WriteLine("どの選挙のロジックを実行しますか？");
+Console.WriteLine("1. 2024衆院選");
+Console.WriteLine("2. 2025都議選");
+Console.WriteLine("3. 2025参院選");
+var electionChoice = Console.ReadLine();
+
+switch (electionChoice)
 {
-    Console.WriteLine("JSONの生成に失敗しました。プログラムを終了します。");
-    return;
+    case "1":
+        Shuinsen2024Logic.MainLogic();
+
+        break;
+    case "2":
+        Togisen2025Logic.MainLogic();
+
+        break;
+    case "3":
+        Saninsen2025Logic.MainLogic();
+
+        break;
+    default:
+        Console.WriteLine("無効な選択です。プログラムを終了します。");
+        return;
 }
 
-// Shuinsen2024Logic.GenerateShuinsen2024(json, directoryPath);
-// Togisen2025Logic.Generate(json, directoryPath);
-Saninsen2025Logic.GenerateSaninsen2025(json, directoryPath);
-
-
-
-Console.WriteLine("出力が完了しました。何か入力するとプログラムが終了します。");
+Console.WriteLine("何か入力するとプログラムが終了します。");
 Console.ReadKey();
