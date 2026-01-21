@@ -83,13 +83,22 @@ namespace ElectionPageCreateTool.Logic
             }
 
             // データの最初の行からキーを取得してカラムを決定
-            var excelKeys = data[0].Keys.ToList();
+            var allExcelKeys = data[0].Keys.ToList();
 
-            // カラムマッピングを適用（マッピングがない場合はExcelのキー名をそのまま使用）
-            var columnDefinitions = excelKeys
-                .Select(key => mappingInfo.ColumnMappings.TryGetValue(key, out var mappedName) ? mappedName : key)
-                .Where(r => r != "Num")
+            // 除外するカラム名（マッピング後の名前）
+            var excludeColumns = new HashSet<string> { "Num" ,"Id"};
+
+            // カラムマッピングを適用し、除外対象を除いたペアを作成
+            var filteredPairs = allExcelKeys
+                .Select(key => (
+                    ExcelKey: key,
+                    ColumnName: mappingInfo.ColumnMappings.TryGetValue(key, out var mappedName) ? mappedName : key
+                ))
+                .Where(pair => !excludeColumns.Contains(pair.ColumnName))
                 .ToList();
+
+            var excelKeys = filteredPairs.Select(p => p.ExcelKey).ToList();
+            var columnDefinitions = filteredPairs.Select(p => p.ColumnName).ToList();
 
             using var connection = new SQLiteConnection(GetConnectionString());
             connection.Open();
