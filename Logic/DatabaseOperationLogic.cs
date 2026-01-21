@@ -100,6 +100,10 @@ namespace ElectionPageCreateTool.Logic
             var excelKeys = filteredPairs.Select(p => p.ExcelKey).ToList();
             var columnDefinitions = filteredPairs.Select(p => p.ColumnName).ToList();
 
+            // テーブル作成用カラム（Excelにないカラムも含める）
+            var additionalColumns = new List<string> { "Result" };
+            var tableColumns = columnDefinitions.Concat(additionalColumns).ToList();
+
             using var connection = new SQLiteConnection(GetConnectionString());
             connection.Open();
 
@@ -108,7 +112,7 @@ namespace ElectionPageCreateTool.Logic
             try
             {
                 // テーブル作成（存在しない場合）
-                CreateTable(connection, tableName, columnDefinitions);
+                CreateTable(connection, tableName, tableColumns);
 
                 // データをUpsert
                 var (insertedCount, updatedCount, skippedCount) = UpsertData(connection, tableName, data, excelKeys, columnDefinitions, mappingInfo);
