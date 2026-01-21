@@ -258,11 +258,58 @@ public static class Shuinsen2026Logic
 
         strBuilder.AppendLine($"<li class='setsumon'><b>設問（1-a）：</b>{resp.Q1Answer}</li>");
         strBuilder.AppendLine($"<li class='setsumon'><b>設問（1-b）：</b>{resp.Q1Reason}</li>");
-        strBuilder.AppendLine($"<li class='setsumon'><b>設問（2-a）：</b>{resp.Q2Answer}</li>");
+        strBuilder.AppendLine($"<li class='setsumon'><b>設問（2-a）：</b>{FormatQ2AnswerAsList(resp.Q2Answer)}</li>");
         strBuilder.AppendLine($"<li class='setsumon'><b>設問（2-b）：</b>{resp.Q2Reason}</li>");
         strBuilder.AppendLine($"<li class='setsumon'><b>設問（3）：</b>{resp.FavoriteMangaAnimeGame}</li>");
         strBuilder.AppendLine("</dl></li></ol></li>");
 
         return strBuilder;
+    }
+
+    /// <summary>
+    /// 設問（2-a）の回答をアルファベット付きリストにフォーマット
+    /// </summary>
+    private static string FormatQ2AnswerAsList(string q2Answer)
+    {
+        if (string.IsNullOrWhiteSpace(q2Answer))
+        {
+            return string.Empty;
+        }
+
+        // 選択肢とアルファベットの対応（アンケートフォームの順番）
+        var choiceOrder = new Dictionary<string, string>
+        {
+            { "刑法のわいせつ物頒布等罪による規制", "A" },
+            { "AV新法による規制", "B" },
+            { "クレジットカード決済の制約", "C" },
+            { "ジェンダー平等論や多様性配慮に基づく表現制限", "D" },
+            { "新サイバー犯罪条約による創作物への規制", "E" },
+            { "「不適切」を理由とする広告の法的規制", "F" },
+            { "AI・機械学習に対する法的規制", "G" },
+            { "国旗損壊罪による創作表現規制の懸念", "H" },
+            { "表現の自由を不当に制限していると思うものは特にない", "I" }
+        };
+
+        // カンマで分割して各回答を取得
+        var answers = q2Answer.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(a => a.Trim())
+            .Where(a => !string.IsNullOrEmpty(a))
+            .ToList();
+
+        if (answers.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        // アンケートの順番でソート
+        var sortedAnswers = answers
+            .OrderBy(a => choiceOrder.TryGetValue(a, out var order) ? order : "Z")
+            .ToList();
+
+        // HTMLリストを生成
+        var listItems = sortedAnswers
+            .Select(a => choiceOrder.TryGetValue(a, out var prefix) ? $"<li>{prefix}. {a}</li>" : $"<li>{a}</li>");
+
+        return $"<ul class='q2-list'>{string.Join("", listItems)}</ul>";
     }
 }
