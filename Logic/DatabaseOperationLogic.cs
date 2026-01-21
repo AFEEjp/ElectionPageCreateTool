@@ -88,6 +88,7 @@ namespace ElectionPageCreateTool.Logic
             // カラムマッピングを適用（マッピングがない場合はExcelのキー名をそのまま使用）
             var columnDefinitions = excelKeys
                 .Select(key => mappingInfo.ColumnMappings.TryGetValue(key, out var mappedName) ? mappedName : key)
+                .Where(r => r != "Num")
                 .ToList();
 
             using var connection = new SQLiteConnection(GetConnectionString());
