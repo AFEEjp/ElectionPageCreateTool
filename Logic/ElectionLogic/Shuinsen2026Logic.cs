@@ -241,14 +241,14 @@ public static class Shuinsen2026Logic
         {
             var age = NoticeDate.Year - birthdate.Year;
             if (birthdate > NoticeDate.AddYears(-age)) age--;
-            strBuilder.AppendLine($"<li class='birthdate'><b>誕生日：</b><br><div class='answer'>{birthdate:yyyy/MM/dd} （{age}歳）</div></li>");
+            strBuilder.AppendLine($"<li class='birthdate'><b>誕生日：</b><br>{birthdate:yyyy/MM/dd} （{age}歳）</li>");
         }
 
-        strBuilder.AppendLine($"<li class='setsumon'><b>設問（1-a）：</b><div class='answer'>{resp.Q1Answer}</div></li>");
-        strBuilder.AppendLine($"<li class='setsumon'><b>設問（1-b）：</b><div class='answer'>{resp.Q1Reason}</div></li>");
-        strBuilder.AppendLine($"<li class='setsumon'><b>設問（2-a）：</b><div class='answer'>{resp.Q2Answer}</div></li>");
-        strBuilder.AppendLine($"<li class='setsumon'><b>設問（2-b）：</b><div class='answer'>{resp.Q2Reason}</div></li>");
-        strBuilder.AppendLine($"<li class='setsumon'><b>設問（3）：</b><div class='answer'>{resp.FavoriteMangaAnimeGame}</div></li>");
+        strBuilder.AppendLine($"<li class='setsumon'><b>設問（1-a）：</b>{resp.Q1Answer}</li>");
+        strBuilder.AppendLine($"<li class='setsumon'><b>設問（1-b）：</b>{resp.Q1Reason}</li>");
+        strBuilder.AppendLine($"<li class='setsumon'><b>設問（2-a）：</b>{resp.Q2Answer}</li>");
+        strBuilder.AppendLine($"<li class='setsumon'><b>設問（2-b）：</b>{resp.Q2Reason}</li>");
+        strBuilder.AppendLine($"<li class='setsumon'><b>設問（3）：</b>{resp.FavoriteMangaAnimeGame}</li>");
         strBuilder.AppendLine("</dl></li></ol></li>");
 
         return strBuilder;
