@@ -12,23 +12,31 @@ public static class Shuinsen2026Logic
 
     public static void MainLogic()
     {
-        Console.Clear();
-
-        Console.WriteLine("処理を選択してください:");
-        Console.WriteLine("1. ExcelファイルをSQLiteに保存");
-        Console.WriteLine("2. サイト生成");
-
-        var choice = Console.ReadLine();
-
-        switch (choice)
+        while (true)
         {
-            case "1":
-                ImportExcelToDatabase();
-                break;
+            Console.Clear();
 
-            case "2":
-                Generate();
-                break;
+            Console.WriteLine("処理を選択してください:");
+            Console.WriteLine("1. ExcelファイルをSQLiteに保存");
+            Console.WriteLine("2. サイト生成");
+            Console.WriteLine("9. 終了");
+
+            var choice = Console.ReadLine();
+
+            switch (choice)
+            {
+                case "1":
+                    ImportExcelToDatabase();
+                    break;
+
+                case "2":
+                    Generate();
+                    break;
+
+                case "9":
+                    Console.WriteLine("プログラムを終了します。");
+                    return;
+            }
         }
     }
 
@@ -52,6 +60,8 @@ public static class Shuinsen2026Logic
 
             dbLogic.UpsertDataToSQLite<Shuinsen2026Respond>(tableName, dic);
         }
+
+        Console.ReadKey();
     }
 
     private static void Generate()
@@ -225,6 +235,8 @@ public static class Shuinsen2026Logic
             Console.WriteLine($"Q3: {resp.FavoriteMangaAnimeGame}");
             Console.WriteLine();
         }
+
+        Console.ReadKey();
     }
 
     public static StringBuilder AppendCandidateInfoHtml(this StringBuilder strBuilder, Shuinsen2026Respond resp)
