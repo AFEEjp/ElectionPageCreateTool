@@ -8,7 +8,7 @@ namespace ElectionPageCreateTool.Logic.ElectionLogic;
 
 public static class Shuinsen2026Logic
 {
-    public static readonly DateTime NoticeDate = new DateTime(2026, 1, 20);
+    public static readonly DateTime NoticeDate = new DateTime(2026, 1, 27);
 
     /// <summary>
     /// Q2選択肢とアルファベットの対応（アンケートフォームの順番）
