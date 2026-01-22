@@ -128,7 +128,7 @@ namespace ElectionPageCreateTool.Logic
         }
 
         /// <summary>
-        /// テーブルを作成（created_at, updated_at付き）
+        /// テーブルを作成（created_at, updated_at付き）+ 履歴テーブルとトリガー
         /// </summary>
         private void CreateTable(SQLiteConnection connection, string tableName, List<string> columnNames)
         {
@@ -146,15 +146,109 @@ namespace ElectionPageCreateTool.Logic
                 }
             }
 
-            // テーブルが存在しない場合のみ作成
+            // メインテーブル作成
             var columns = string.Join(", ", columnNames.Select(c => $"[{c}] TEXT"));
             var createTableSql = $"CREATE TABLE [{tableName}] (id INTEGER PRIMARY KEY AUTOINCREMENT, {columns}, created_at TEXT, updated_at TEXT)";
 
-            using var command = connection.CreateCommand();
-            command.CommandText = createTableSql;
-            command.ExecuteNonQuery();
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = createTableSql;
+                command.ExecuteNonQuery();
+            }
 
             Console.WriteLine($"テーブル '{tableName}' を作成しました。カラム: {string.Join(", ", columnNames)}, created_at, updated_at");
+
+            // 履歴テーブルとトリガーを作成
+            CreateHistoryTableAndTriggers(connection, tableName, columnNames);
+        }
+
+        /// <summary>
+        /// 履歴テーブルとトリガーを作成
+        /// </summary>
+        private void CreateHistoryTableAndTriggers(SQLiteConnection connection, string tableName, List<string> columnNames)
+        {
+            var historyTableName = $"{tableName}_History";
+
+            // 履歴テーブル作成（メインテーブルのカラム + 履歴用メタデータ）
+            var columns = string.Join(", ", columnNames.Select(c => $"[{c}] TEXT"));
+            var createHistorySql = $@"
+                CREATE TABLE [{historyTableName}] (
+                    _HistoryId INTEGER PRIMARY KEY AUTOINCREMENT,
+                    _Operation TEXT NOT NULL,
+                    _ValidFrom TEXT NOT NULL,
+                    _ValidTo TEXT,
+                    id INTEGER,
+                    {columns},
+                    created_at TEXT,
+                    updated_at TEXT
+                )";
+
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = createHistorySql;
+                command.ExecuteNonQuery();
+            }
+
+            // カラム名リスト（トリガー用）
+            var allColumns = new[] { "id" }.Concat(columnNames).Concat(new[] { "created_at", "updated_at" }).ToList();
+            var columnList = string.Join(", ", allColumns.Select(c => $"[{c}]"));
+            var oldColumnList = string.Join(", ", allColumns.Select(c => $"OLD.[{c}]"));
+            var newColumnList = string.Join(", ", allColumns.Select(c => $"NEW.[{c}]"));
+
+            // INSERT トリガー
+            var insertTriggerSql = $@"
+                CREATE TRIGGER [{tableName}_Insert_History]
+                AFTER INSERT ON [{tableName}]
+                BEGIN
+                    INSERT INTO [{historyTableName}] (_Operation, _ValidFrom, {columnList})
+                    VALUES ('INSERT', datetime('now', 'localtime'), {newColumnList});
+                END";
+
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = insertTriggerSql;
+                command.ExecuteNonQuery();
+            }
+
+            // UPDATE トリガー（更新前のレコードを履歴に保存）
+            var updateTriggerSql = $@"
+                CREATE TRIGGER [{tableName}_Update_History]
+                AFTER UPDATE ON [{tableName}]
+                BEGIN
+                    UPDATE [{historyTableName}]
+                    SET _ValidTo = datetime('now', 'localtime')
+                    WHERE id = OLD.id AND _ValidTo IS NULL;
+
+                    INSERT INTO [{historyTableName}] (_Operation, _ValidFrom, {columnList})
+                    VALUES ('UPDATE', datetime('now', 'localtime'), {newColumnList});
+                END";
+
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = updateTriggerSql;
+                command.ExecuteNonQuery();
+            }
+
+            // DELETE トリガー
+            var deleteTriggerSql = $@"
+                CREATE TRIGGER [{tableName}_Delete_History]
+                AFTER DELETE ON [{tableName}]
+                BEGIN
+                    UPDATE [{historyTableName}]
+                    SET _ValidTo = datetime('now', 'localtime')
+                    WHERE id = OLD.id AND _ValidTo IS NULL;
+
+                    INSERT INTO [{historyTableName}] (_Operation, _ValidFrom, _ValidTo, {columnList})
+                    VALUES ('DELETE', datetime('now', 'localtime'), datetime('now', 'localtime'), {oldColumnList});
+                END";
+
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = deleteTriggerSql;
+                command.ExecuteNonQuery();
+            }
+
+            Console.WriteLine($"履歴テーブル '{historyTableName}' とトリガーを作成しました。");
         }
 
         /// <summary>
