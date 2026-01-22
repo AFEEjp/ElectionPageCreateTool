@@ -10,6 +10,22 @@ public static class Shuinsen2026Logic
 {
     public static readonly DateTime NoticeDate = new DateTime(2026, 1, 20);
 
+    /// <summary>
+    /// Q2選択肢とアルファベットの対応（アンケートフォームの順番）
+    /// </summary>
+    private static readonly Dictionary<string, string> Q2ChoiceOrder = new()
+    {
+        { "刑法のわいせつ物頒布等罪による規制", "A" },
+        { "AV新法による規制", "B" },
+        { "クレジットカード決済の制約", "C" },
+        { "ジェンダー平等論や多様性配慮に基づく表現制限", "D" },
+        { "新サイバー犯罪条約による創作物への規制", "E" },
+        { "「不適切」を理由とする広告の法的規制", "F" },
+        { "AI・機械学習に対する法的規制", "G" },
+        { "国旗損壊罪による創作表現規制の懸念", "H" },
+        { "表現の自由を不当に制限していると思うものは特にない", "I" }
+    };
+
     public static void MainLogic()
     {
         while (true)
@@ -19,6 +35,7 @@ public static class Shuinsen2026Logic
             Console.WriteLine("処理を選択してください:");
             Console.WriteLine("1. ExcelファイルをSQLiteに保存");
             Console.WriteLine("2. サイト生成");
+            Console.WriteLine("3. データをExcelに出力");
             Console.WriteLine("9. 終了");
 
             var choice = Console.ReadLine();
@@ -31,6 +48,10 @@ public static class Shuinsen2026Logic
 
                 case "2":
                     Generate();
+                    break;
+
+                case "3":
+                    ExportFromDatabase();
                     break;
 
                 case "9":
@@ -62,6 +83,103 @@ public static class Shuinsen2026Logic
         }
 
         Console.ReadKey();
+    }
+
+    private static void ExportFromDatabase()
+    {
+        // 環境変数から出力先ディレクトリを取得
+        var configuration = new ConfigurationBuilder()
+            .SetBasePath(AppDomain.CurrentDomain.BaseDirectory)
+            .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+            .Build();
+
+        var directoryPath = configuration["OutputSettings:DirectoryPath"];
+
+        // 環境変数に設定がない場合は入力を求める
+        if (string.IsNullOrEmpty(directoryPath))
+        {
+            Console.WriteLine("出力先ディレクトリを入力してください:");
+            directoryPath = Console.ReadLine();
+
+            if (string.IsNullOrEmpty(directoryPath))
+            {
+                Console.WriteLine("出力先ディレクトリが指定されていません。");
+                return;
+            }
+        }
+        else
+        {
+            Console.WriteLine($"出力先ディレクトリ: {directoryPath}");
+        }
+
+        if (!Directory.Exists(directoryPath))
+        {
+            Directory.CreateDirectory(directoryPath);
+        }
+
+        var dbLogic = new DatabaseOperationLogic();
+        var tableName = nameof(Shuinsen2026Respond);
+
+        // ファイル名: テーブル名_yyyyMMddHHmmss.xlsx
+        var fileName = $"{tableName}_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
+        var outputFilePath = Path.Combine(directoryPath, fileName);
+
+        dbLogic.ExportToExcel<Shuinsen2026Respond>(
+            tableName: tableName,
+            outputFilePath: outputFilePath,
+            excludeColumns: ["Result"],
+            valueTransformer: ApplyNoAnswerRule);
+
+        Console.ReadKey();
+    }
+
+    /// <summary>
+    /// Excel出力用の値変換ロジック
+    /// Q1Reason/Q2Reasonが"無回答"の場合は"無回答"に置き換え、
+    /// Q2Answerはアルファベット付きで改行区切りにフォーマット
+    /// </summary>
+    private static string ApplyNoAnswerRule(Shuinsen2026Respond item, string propertyName, string value)
+    {
+        return propertyName switch
+        {
+            "Q1Answer" when item.Q1Reason == "無回答" => "無回答",
+            "Q2Answer" when item.Q2Reason == "無回答" => "無回答",
+            "Q2Answer" => FormatQ2AnswerForExcel(value),
+            _ => value
+        };
+    }
+
+    /// <summary>
+    /// 設問（2-a）の回答をExcel用にフォーマット（アルファベット付き、改行区切り）
+    /// </summary>
+    private static string FormatQ2AnswerForExcel(string q2Answer)
+    {
+        if (string.IsNullOrWhiteSpace(q2Answer))
+        {
+            return string.Empty;
+        }
+
+        // カンマで分割して各回答を取得
+        var answers = q2Answer.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(a => a.Trim())
+            .Where(a => !string.IsNullOrEmpty(a))
+            .ToList();
+
+        if (answers.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        // アンケートの順番でソート
+        var sortedAnswers = answers
+            .OrderBy(a => Q2ChoiceOrder.TryGetValue(a, out var order) ? order : "Z")
+            .ToList();
+
+        // アルファベット付きで改行区切りにフォーマット
+        var formattedItems = sortedAnswers
+            .Select(a => Q2ChoiceOrder.TryGetValue(a, out var prefix) ? $"{prefix}. {a}" : a);
+
+        return string.Join("\n", formattedItems);
     }
 
     private static void Generate()
@@ -272,7 +390,7 @@ public static class Shuinsen2026Logic
     }
 
     /// <summary>
-    /// 設問（2-a）の回答をアルファベット付きリストにフォーマット
+    /// 設問（2-a）の回答をHTML用にアルファベット付きリストにフォーマット
     /// </summary>
     private static string FormatQ2AnswerAsList(string q2Answer)
     {
@@ -280,20 +398,6 @@ public static class Shuinsen2026Logic
         {
             return string.Empty;
         }
-
-        // 選択肢とアルファベットの対応（アンケートフォームの順番）
-        var choiceOrder = new Dictionary<string, string>
-        {
-            { "刑法のわいせつ物頒布等罪による規制", "A" },
-            { "AV新法による規制", "B" },
-            { "クレジットカード決済の制約", "C" },
-            { "ジェンダー平等論や多様性配慮に基づく表現制限", "D" },
-            { "新サイバー犯罪条約による創作物への規制", "E" },
-            { "「不適切」を理由とする広告の法的規制", "F" },
-            { "AI・機械学習に対する法的規制", "G" },
-            { "国旗損壊罪による創作表現規制の懸念", "H" },
-            { "表現の自由を不当に制限していると思うものは特にない", "I" }
-        };
 
         // カンマで分割して各回答を取得
         var answers = q2Answer.Split(',', StringSplitOptions.RemoveEmptyEntries)
@@ -308,12 +412,12 @@ public static class Shuinsen2026Logic
 
         // アンケートの順番でソート
         var sortedAnswers = answers
-            .OrderBy(a => choiceOrder.TryGetValue(a, out var order) ? order : "Z")
+            .OrderBy(a => Q2ChoiceOrder.TryGetValue(a, out var order) ? order : "Z")
             .ToList();
 
         // HTMLリストを生成
         var listItems = sortedAnswers
-            .Select(a => choiceOrder.TryGetValue(a, out var prefix) ? $"<li>{prefix}. {a}</li>" : $"<li>{a}</li>");
+            .Select(a => Q2ChoiceOrder.TryGetValue(a, out var prefix) ? $"<li>{prefix}. {a}</li>" : $"<li>{a}</li>");
 
         return $"<ul class='q2-list'>{string.Join("", listItems)}</ul>";
     }

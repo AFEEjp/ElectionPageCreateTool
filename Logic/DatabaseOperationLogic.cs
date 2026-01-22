@@ -1,5 +1,6 @@
 using System.Data.SQLite;
 using System.Reflection;
+using ClosedXML.Excel;
 using ElectionPageCreateTool.Attributes;
 using Microsoft.Extensions.Configuration;
 
@@ -521,6 +522,149 @@ namespace ElectionPageCreateTool.Logic
         public string GetDbFilePath()
         {
             return _dbFilePath;
+        }
+
+        /// <summary>
+        /// SQLiteのデータをExcelファイルにエクスポート
+        /// </summary>
+        /// <typeparam name="T">モデルクラス</typeparam>
+        /// <param name="tableName">テーブル名</param>
+        /// <param name="outputFilePath">出力ファイルパス</param>
+        /// <param name="excludeColumns">除外するカラム名の配列（デフォルトでcreated_at, updated_atは除外）</param>
+        /// <param name="valueTransformer">値変換ロジック (item, propertyName, originalValue) => transformedValue</param>
+        public void ExportToExcel<T>(
+            string tableName,
+            string outputFilePath,
+            string[]? excludeColumns = null,
+            Func<T, string, string, string>? valueTransformer = null) where T : class, new()
+        {
+            if (string.IsNullOrWhiteSpace(tableName))
+            {
+                throw new ArgumentException("テーブル名を指定してください。", nameof(tableName));
+            }
+
+            // デフォルトの除外カラム
+            var defaultExcludeColumns = new HashSet<string> { "created_at", "updated_at" };
+            if (excludeColumns != null)
+            {
+                foreach (var col in excludeColumns)
+                {
+                    defaultExcludeColumns.Add(col);
+                }
+            }
+
+            // モデルクラスからカラム情報を取得（プロパティ名 → 日本語ヘッダー名）
+            var columnToHeaderMap = GetColumnToHeaderMap<T>();
+
+            // 出力対象のプロパティを取得（除外カラムを除く）
+            var properties = typeof(T).GetProperties()
+                .Where(p => p.GetCustomAttribute<ExcelColumnAttribute>() != null)
+                .Where(p => !defaultExcludeColumns.Contains(p.Name))
+                .ToList();
+
+            // DBからデータを取得
+            var data = GetAllData<T>(tableName);
+
+            if (data.Count == 0)
+            {
+                Console.WriteLine($"テーブル '{tableName}' にデータがありません。");
+                return;
+            }
+
+            // Excelファイルを作成
+            using var workbook = new XLWorkbook();
+            var worksheet = workbook.Worksheets.Add(tableName);
+
+            // ヘッダー行を出力
+            var headerRow = worksheet.Row(1);
+            for (var colIndex = 0; colIndex < properties.Count; colIndex++)
+            {
+                var prop = properties[colIndex];
+                var headerName = columnToHeaderMap.TryGetValue(prop.Name, out var header) ? header : prop.Name;
+                var cell = worksheet.Cell(1, colIndex + 1);
+                cell.Value = headerName;
+            }
+
+            // ヘッダー行のスタイル設定
+            var headerRange = worksheet.Range(1, 1, 1, properties.Count);
+            headerRange.Style.Fill.BackgroundColor = XLColor.FromHtml("#4472C4");
+            headerRange.Style.Font.Bold = true;
+            headerRange.Style.Font.FontColor = XLColor.White;
+            headerRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            headerRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+
+            // データ行を出力
+            for (var rowIndex = 0; rowIndex < data.Count; rowIndex++)
+            {
+                var item = data[rowIndex];
+
+                for (var colIndex = 0; colIndex < properties.Count; colIndex++)
+                {
+                    var prop = properties[colIndex];
+                    var value = prop.GetValue(item)?.ToString() ?? string.Empty;
+
+                    // 値変換ロジックが指定されていれば適用
+                    if (valueTransformer != null)
+                    {
+                        value = valueTransformer(item, prop.Name, value);
+                    }
+
+                    var cell = worksheet.Cell(rowIndex + 2, colIndex + 1);
+                    cell.Value = value;
+                }
+            }
+
+            // データ行全体で折り返して表示を有効化
+            if (data.Count > 0)
+            {
+                var dataBodyRange = worksheet.Range(2, 1, data.Count + 1, properties.Count);
+                dataBodyRange.Style.Alignment.WrapText = true;
+            }
+
+            // データ範囲全体に枠線を設定
+            var dataRange = worksheet.Range(1, 1, data.Count + 1, properties.Count);
+            dataRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+            dataRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+            dataRange.Style.Border.OutsideBorderColor = XLColor.Black;
+            dataRange.Style.Border.InsideBorderColor = XLColor.Gray;
+
+            // 全セルの上揃え設定
+            dataRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
+
+            // 列幅を自動調整（最大幅を制限）
+            foreach (var column in worksheet.ColumnsUsed())
+            {
+                column.AdjustToContents();
+                if (column.Width > 50)
+                {
+                    column.Width = 50;
+                }
+            }
+
+            // ヘッダー行を固定
+            worksheet.SheetView.FreezeRows(1);
+
+            // ファイルを保存
+            workbook.SaveAs(outputFilePath);
+            Console.WriteLine($"Excelファイルを出力しました: {outputFilePath} ({data.Count} 件)");
+        }
+
+        /// <summary>
+        /// モデルクラスからプロパティ名→日本語ヘッダー名のマッピングを取得
+        /// </summary>
+        private static Dictionary<string, string> GetColumnToHeaderMap<T>()
+        {
+            var map = new Dictionary<string, string>();
+            var properties = typeof(T).GetProperties()
+                .Where(p => p.GetCustomAttribute<ExcelColumnAttribute>() != null);
+
+            foreach (var prop in properties)
+            {
+                var attr = prop.GetCustomAttribute<ExcelColumnAttribute>()!;
+                map[prop.Name] = attr.HeaderName;
+            }
+
+            return map;
         }
 
         /// <summary>
