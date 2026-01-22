@@ -137,6 +137,7 @@ public static class Shuinsen2026Logic
     /// Excel出力用の値変換ロジック
     /// Q1Reason/Q2Reasonが"無回答"の場合は"無回答"に置き換え、
     /// Q2Answerはアルファベット付きで改行区切りにフォーマット
+    /// 生年月日は日付のみにフォーマット
     /// </summary>
     private static string ApplyNoAnswerRule(Shuinsen2026Respond item, string propertyName, string value)
     {
@@ -145,8 +146,27 @@ public static class Shuinsen2026Logic
             "Q1Answer" when item.Q1Reason == "無回答" => "無回答",
             "Q2Answer" when item.Q2Reason == "無回答" => "無回答",
             "Q2Answer" => FormatQ2AnswerForExcel(value),
+            "Birthdate" => FormatDateOnly(value),
             _ => value
         };
+    }
+
+    /// <summary>
+    /// 日付文字列から日付部分のみを取得
+    /// </summary>
+    private static string FormatDateOnly(string dateValue)
+    {
+        if (string.IsNullOrWhiteSpace(dateValue))
+        {
+            return string.Empty;
+        }
+
+        if (DateTime.TryParse(dateValue, out var date))
+        {
+            return date.ToString("yyyy/MM/dd");
+        }
+
+        return dateValue;
     }
 
     /// <summary>
