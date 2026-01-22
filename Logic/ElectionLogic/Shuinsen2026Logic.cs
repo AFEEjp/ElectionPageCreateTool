@@ -178,8 +178,8 @@ public static class Shuinsen2026Logic
 
         // 比例ブロックごとに候補者情報を分ける
         var removeRecords = new List<Shuinsen2026Respond>();
-        var 比例ブロック出力内容Dic = new Dictionary<ShuinHireiBlock, List<Shuinsen2026Respond>>();
-        foreach (var blk in Enum.GetValues<ShuinHireiBlock>())
+        var 比例ブロック出力内容Dic = new Dictionary<ShuinHireiBlock2026, List<Shuinsen2026Respond>>();
+        foreach (var blk in Enum.GetValues<ShuinHireiBlock2026>())
         {
             var blockName = blk.GetDescription();
 
