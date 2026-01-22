@@ -256,9 +256,14 @@ public static class Shuinsen2026Logic
             strBuilder.AppendLine($"<li class='birthdate'><b>誕生日：</b><br>{birthdate:yyyy/MM/dd} （{age}歳）</li>");
         }
 
-        strBuilder.AppendLine($"<li class='setsumon'><b>設問（1-a）：</b>{resp.Q1Answer}</li>");
+        // Q1Reasonが"無回答"の場合はQ1Answerも"無回答"として出力
+        var q1Answer = resp.Q1Reason == "無回答" ? "無回答" : resp.Q1Answer;
+        strBuilder.AppendLine($"<li class='setsumon'><b>設問（1-a）：</b>{q1Answer}</li>");
         strBuilder.AppendLine($"<li class='setsumon'><b>設問（1-b）：</b>{resp.Q1Reason}</li>");
-        strBuilder.AppendLine($"<li class='setsumon'><b>設問（2-a）：</b>{FormatQ2AnswerAsList(resp.Q2Answer)}</li>");
+
+        // Q2Reasonが"無回答"の場合はQ2Answerも"無回答"として出力
+        var q2AnswerDisplay = resp.Q2Reason == "無回答" ? "無回答" : FormatQ2AnswerAsList(resp.Q2Answer);
+        strBuilder.AppendLine($"<li class='setsumon'><b>設問（2-a）：</b>{q2AnswerDisplay}</li>");
         strBuilder.AppendLine($"<li class='setsumon'><b>設問（2-b）：</b>{resp.Q2Reason}</li>");
         strBuilder.AppendLine($"<li class='setsumon'><b>設問（3）：</b>{resp.FavoriteMangaAnimeGame}</li>");
         strBuilder.AppendLine("</dl></li></ol></li>");
