@@ -532,11 +532,13 @@ namespace ElectionPageCreateTool.Logic
         /// <param name="outputFilePath">出力ファイルパス</param>
         /// <param name="excludeColumns">除外するカラム名の配列（デフォルトでcreated_at, updated_atは除外）</param>
         /// <param name="valueTransformer">値変換ロジック (item, propertyName, originalValue) => transformedValue</param>
+        /// <param name="workbookCustomizer">保存前にワークブックをカスタマイズするコールバック</param>
         public void ExportToExcel<T>(
             string tableName,
             string outputFilePath,
             string[]? excludeColumns = null,
-            Func<T, string, string, string>? valueTransformer = null) where T : class, new()
+            Func<T, string, string, string>? valueTransformer = null,
+            Action<IXLWorkbook, List<T>>? workbookCustomizer = null) where T : class, new()
         {
             if (string.IsNullOrWhiteSpace(tableName))
             {
@@ -643,6 +645,9 @@ namespace ElectionPageCreateTool.Logic
 
             // ヘッダー行を固定
             worksheet.SheetView.FreezeRows(1);
+
+            // カスタマイズコールバックを実行
+            workbookCustomizer?.Invoke(workbook, data);
 
             // ファイルを保存
             workbook.SaveAs(outputFilePath);

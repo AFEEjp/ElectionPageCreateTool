@@ -1,4 +1,5 @@
 using System.Text;
+using ClosedXML.Excel;
 using ElectionPageCreateTool.Extensions;
 using ElectionPageCreateTool.Model;
 using ElectionPageCreateTool.Model.Shuinsen2026;
@@ -128,9 +129,118 @@ public static class Shuinsen2026Logic
             tableName: tableName,
             outputFilePath: outputFilePath,
             excludeColumns: ["Result"],
-            valueTransformer: ApplyNoAnswerRule);
+            valueTransformer: ApplyNoAnswerRule,
+            workbookCustomizer: AddQ2FilterSheet);
 
         Console.ReadKey();
+    }
+
+    /// <summary>
+    /// Q2選択肢フィルター用シートを追加
+    /// </summary>
+    private static void AddQ2FilterSheet(IXLWorkbook workbook, List<Shuinsen2026Respond> data)
+    {
+        var worksheet = workbook.Worksheets.Add("Q2フィルター");
+
+        // ヘッダー行を作成
+        var headers = new List<string>
+        {
+            "候補者名",
+            "選挙区",
+            "政党",
+            "A. 刑法のわいせつ物頒布等罪による規制",
+            "B. AV新法による規制",
+            "C. クレジットカード決済の制約",
+            "D. ジェンダー平等論や多様性配慮に基づく表現制限",
+            "E. 新サイバー犯罪条約による創作物への規制",
+            "F. 「不適切」を理由とする広告の法的規制",
+            "G. AI・機械学習に対する法的規制",
+            "H. 国旗損壊罪による創作表現規制の懸念",
+            "I. 表現の自由を不当に制限していると思うものは特にない",
+            "無回答"
+        };
+
+        // Q2選択肢のリスト（チェック用）
+        var q2Choices = Q2ChoiceOrder.Keys.ToList();
+
+        // ヘッダー出力
+        for (var i = 0; i < headers.Count; i++)
+        {
+            worksheet.Cell(1, i + 1).Value = headers[i];
+        }
+
+        // ヘッダースタイル
+        var headerRange = worksheet.Range(1, 1, 1, headers.Count);
+        headerRange.Style.Fill.BackgroundColor = XLColor.FromHtml("#4472C4");
+        headerRange.Style.Font.Bold = true;
+        headerRange.Style.Font.FontColor = XLColor.White;
+        headerRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        headerRange.Style.Alignment.WrapText = true;
+
+        // データ行を出力
+        for (var rowIndex = 0; rowIndex < data.Count; rowIndex++)
+        {
+            var item = data[rowIndex];
+            var row = rowIndex + 2;
+
+            worksheet.Cell(row, 1).Value = item.Name;
+            worksheet.Cell(row, 2).Value = item.Constituency;
+            worksheet.Cell(row, 3).Value = item.PartyName;
+
+            // 無回答チェック
+            var isNoAnswer = item.Q2Reason == "無回答";
+
+            if (isNoAnswer)
+            {
+                // 無回答の場合は最後の列に○
+                worksheet.Cell(row, headers.Count).Value = "○";
+            }
+            else
+            {
+                // Q2Answerをカンマで分割
+                var selectedChoices = item.Q2Answer
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(a => a.Trim())
+                    .ToHashSet();
+
+                // 各選択肢に○を設定
+                for (var choiceIndex = 0; choiceIndex < q2Choices.Count; choiceIndex++)
+                {
+                    if (selectedChoices.Contains(q2Choices[choiceIndex]))
+                    {
+                        worksheet.Cell(row, choiceIndex + 4).Value = "○";
+                    }
+                }
+            }
+        }
+
+        // 枠線設定
+        var dataRange = worksheet.Range(1, 1, data.Count + 1, headers.Count);
+        dataRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        dataRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        dataRange.Style.Border.OutsideBorderColor = XLColor.Black;
+        dataRange.Style.Border.InsideBorderColor = XLColor.Gray;
+
+        // 選択肢列を中央揃え
+        var choiceRange = worksheet.Range(2, 4, data.Count + 1, headers.Count);
+        choiceRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+        // 列幅調整
+        worksheet.Column(1).Width = 15;  // 候補者名
+        worksheet.Column(2).Width = 20;  // 選挙区
+        worksheet.Column(3).Width = 15;  // 政党
+        for (var i = 4; i <= headers.Count; i++)
+        {
+            worksheet.Column(i).Width = 8;  // 選択肢列
+        }
+
+        // ヘッダー行を固定
+        worksheet.SheetView.FreezeRows(1);
+
+        // オートフィルター設定
+        worksheet.RangeUsed()?.SetAutoFilter();
+
+        Console.WriteLine("Q2フィルターシートを追加しました。");
     }
 
     /// <summary>
