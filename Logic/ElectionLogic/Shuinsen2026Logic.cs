@@ -12,6 +12,16 @@ public static class Shuinsen2026Logic
     public static readonly DateTime NoticeDate = new DateTime(2026, 1, 27);
 
     /// <summary>
+    /// Q1選択肢とアルファベットの対応（アンケートフォームの順番）
+    /// </summary>
+    private static readonly Dictionary<string, string> Q1ChoiceOrder = new()
+    {
+        { "法律で禁止するべき", "A" },
+        { "法律で禁止するべきではない", "B" },
+        { "どちらともいえない、答えない", "C" }
+    };
+
+    /// <summary>
     /// Q2選択肢とアルファベットの対応（アンケートフォームの順番）
     /// </summary>
     private static readonly Dictionary<string, string> Q2ChoiceOrder = new()
@@ -489,7 +499,15 @@ public static class Shuinsen2026Logic
 
     public static StringBuilder AppendCandidateInfoHtml(this StringBuilder strBuilder, Shuinsen2026Respond resp)
     {
-        strBuilder.AppendLine("<li><ol><li><dl>");
+        // Q1/Q2の回答をdata属性用にアルファベットコードに変換
+        var q1DataValue = resp.Q1Reason == "無回答"
+            ? "無回答"
+            : Q1ChoiceOrder.TryGetValue(resp.Q1Answer.Trim(), out var q1Code) ? q1Code : resp.Q1Answer;
+        var q2DataValue = resp.Q2Reason == "無回答"
+            ? "無回答"
+            : ConvertQ2AnswerToCodes(resp.Q2Answer);
+
+        strBuilder.AppendLine($"<li class='candidate-card' data-q1='{System.Web.HttpUtility.HtmlAttributeEncode(q1DataValue)}' data-q2='{System.Web.HttpUtility.HtmlAttributeEncode(q2DataValue)}'><ol><li><dl>");
 
         var name = $"{resp.Name.Trim().Replace("　", " ")}<span>（{resp.NameFurigana.Trim().Replace("　", " ")}）</span>";
         var hrefAnchor = $"{resp.PartyName}_{resp.Name.Trim().Replace("　", "").Replace(" ", "").Replace("\u3000", "")}";
@@ -517,6 +535,34 @@ public static class Shuinsen2026Logic
         strBuilder.AppendLine("</dl></li></ol></li>");
 
         return strBuilder;
+    }
+
+    /// <summary>
+    /// Q2回答をカンマ区切りのアルファベットコードに変換（data属性用）
+    /// </summary>
+    private static string ConvertQ2AnswerToCodes(string q2Answer)
+    {
+        if (string.IsNullOrWhiteSpace(q2Answer))
+        {
+            return string.Empty;
+        }
+
+        var answers = q2Answer.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(a => a.Trim())
+            .Where(a => !string.IsNullOrEmpty(a))
+            .ToList();
+
+        if (answers.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        // アルファベットコードに変換
+        var codes = answers
+            .Select(a => Q2ChoiceOrder.TryGetValue(a, out var code) ? code : a)
+            .OrderBy(c => c);
+
+        return string.Join(",", codes);
     }
 
     /// <summary>
