@@ -408,13 +408,15 @@ public static class Shuinsen2026Logic
 
         foreach (var vt in 小選挙区出力内容Dic)
         {
+            strBldr.AppendLine($"<div class='district-section'>");
             strBldr.AppendLine($"<h3 id='pref-{vt.都道府県名.ToString().ToLower()}'>{vt.都道府県名.GetDescription()}</h3>");
             strBldr.AppendLine("<div>");
 
             foreach (var kv in vt.候補者情報リスト)
             {
+                strBldr.AppendLine($"<div class='kuwari-section'>");
                 strBldr.AppendLine($"<h4 id='kuwari-{kv.Key.EnStr}'>{kv.Key.JpStr}</h4>");
-                strBldr.AppendLine("<div class='kohosya-info')><ol class='distList'>");
+                strBldr.AppendLine("<div class='kohosya-info'><ol class='distList'>");
 
                 foreach (var resp in kv.Value)
                 {
@@ -422,8 +424,10 @@ public static class Shuinsen2026Logic
                 }
 
                 strBldr.AppendLine("</ol></div>");
+                strBldr.AppendLine("</div>");
             }
 
+            strBldr.AppendLine("</div>");
             strBldr.AppendLine("</div>");
         }
         var 小選挙区出力 = strBldr.ToString();
@@ -460,14 +464,16 @@ public static class Shuinsen2026Logic
         // 比例ブロックの出力
         foreach (var kv in 比例ブロック出力内容Dic)
         {
+            strBldr.AppendLine($"<div class='kuwari-section'>");
             strBldr.AppendLine($"<h3 id='hirei-{kv.Key.ToString().ToLower()}'>{kv.Key.GetDescription()}</h3>");
-            strBldr.AppendLine("<div class='kohosya-info')><ol class='distList'>");
+            strBldr.AppendLine("<div class='kohosya-info'><ol class='distList'>");
 
             foreach (var resp in kv.Value)
             {
                 strBldr.AppendCandidateInfoHtml(resp);
             }
 
+            strBldr.AppendLine("</ol></div>");
             strBldr.AppendLine("</div>");
         }
 
@@ -507,7 +513,7 @@ public static class Shuinsen2026Logic
             ? "無回答"
             : ConvertQ2AnswerToCodes(resp.Q2Answer);
 
-        strBuilder.AppendLine($"<li class='candidate-card' data-q1='{System.Web.HttpUtility.HtmlAttributeEncode(q1DataValue)}' data-q2='{System.Web.HttpUtility.HtmlAttributeEncode(q2DataValue)}'><ol><li><dl>");
+        strBuilder.AppendLine($"<li class='candidate-card' data-q1='{System.Web.HttpUtility.HtmlAttributeEncode(q1DataValue)}' data-q2='{System.Web.HttpUtility.HtmlAttributeEncode(q2DataValue)}' data-party='{System.Web.HttpUtility.HtmlAttributeEncode(resp.PartyName)}'><ol><li><dl>");
 
         var name = $"{resp.Name.Trim().Replace("　", " ")}<span>（{resp.NameFurigana.Trim().Replace("　", " ")}）</span>";
         var hrefAnchor = $"{resp.PartyName}_{resp.Name.Trim().Replace("　", "").Replace(" ", "").Replace("\u3000", "")}";
