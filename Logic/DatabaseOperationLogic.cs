@@ -253,7 +253,10 @@ namespace ElectionPageCreateTool.Logic
         }
 
         /// <summary>
-        /// データをUpsert（追加または更新）
+        /// データをUpsert（追加または更新）- 新ロジック
+        /// Step1: ふりがなのみで検索
+        /// Step2: 0件→INSERT、1件or複数件→選挙区+政党で絞り込み
+        /// Step3: 一致なし→ユーザー確認
         /// </summary>
         private (int insertedCount, int updatedCount, int skippedCount) UpsertData(SQLiteConnection connection, string tableName,
             List<Dictionary<string, string>> data, List<string> excelKeys, List<string> columnNames, ColumnMappingInfo mappingInfo)
@@ -263,41 +266,317 @@ namespace ElectionPageCreateTool.Logic
             var skippedCount = 0;
             var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
 
+            // ふりがなキーを取得
+            var furiganaKey = mappingInfo.UpsertKeys.FirstOrDefault(k => k.isFurigana);
+            if (furiganaKey == default)
+            {
+                throw new InvalidOperationException("ふりがなキー（IsFurigana=true）が設定されていません。");
+            }
+
+            // ふりがな以外のUpsertキー（選挙区、政党など）
+            var otherKeys = mappingInfo.UpsertKeys.Where(k => !k.isFurigana).ToList();
+
             foreach (var row in data)
             {
-                // 既存レコードを検索（データも取得）
-                var existingRecord = FindExistingRecordWithData(connection, tableName, row, columnNames, mappingInfo);
+                var furiganaValue = row.TryGetValue(furiganaKey.excelHeader, out var fv) ? fv : "";
 
-                if (existingRecord.HasValue)
+                // Step1: ふりがなのみで既存レコードを検索
+                var furiganaMatches = FindRecordsByFurigana(connection, tableName, furiganaValue, furiganaKey.columnName, columnNames);
+
+                if (furiganaMatches.Count == 0)
                 {
-                    // 値が変更されているか確認
-                    if (HasChanges(row, existingRecord.Value.data, excelKeys, columnNames))
-                    {
-                        // 更新
-                        UpdateRecord(connection, tableName, existingRecord.Value.id, row, excelKeys, columnNames, now);
-                        updatedCount++;
-
-                        // 更新された項目を表示
-                        var keyValues = mappingInfo.UpsertKeys
-                            .Select(k => row.TryGetValue(k.excelHeader, out var v) ? v : "")
-                            .ToList();
-                        Console.WriteLine($"  [更新] {string.Join(" / ", keyValues)}");
-                    }
-                    else
-                    {
-                        // 変更なしのためスキップ
-                        skippedCount++;
-                    }
+                    // 0件ヒット → 新規INSERT
+                    InsertRecord(connection, tableName, row, excelKeys, columnNames, now);
+                    insertedCount++;
+                    Console.WriteLine($"  [新規] {furiganaValue}");
                 }
                 else
                 {
-                    // 挿入
-                    InsertRecord(connection, tableName, row, excelKeys, columnNames, now);
-                    insertedCount++;
+                    // 1件以上ヒット → 選挙区+政党で絞り込み
+                    var exactMatches = FindExactMatches(furiganaMatches, row, otherKeys);
+
+                    if (exactMatches.Count == 1)
+                    {
+                        // 選挙区+政党も一致する1件 → 値比較して更新orスキップ
+                        var match = exactMatches[0];
+                        if (HasChanges(row, match.data, excelKeys, columnNames))
+                        {
+                            UpdateRecord(connection, tableName, match.id, row, excelKeys, columnNames, now);
+                            updatedCount++;
+                            Console.WriteLine($"  [更新] {furiganaValue}");
+                        }
+                        else
+                        {
+                            skippedCount++;
+                        }
+                    }
+                    else if (exactMatches.Count > 1)
+                    {
+                        // 選挙区+政党一致が複数件（通常ありえないが念のため）
+                        Console.WriteLine($"  [警告] 完全一致レコードが複数見つかりました: {furiganaValue}");
+                        var match = exactMatches[0]; // 最初の1件を更新
+                        if (HasChanges(row, match.data, excelKeys, columnNames))
+                        {
+                            UpdateRecord(connection, tableName, match.id, row, excelKeys, columnNames, now);
+                            updatedCount++;
+                        }
+                        else
+                        {
+                            skippedCount++;
+                        }
+                    }
+                    else
+                    {
+                        // 選挙区+政党一致が0件 → ユーザー確認
+                        var action = PromptUserForAction(row, furiganaMatches, furiganaKey, otherKeys);
+
+                        switch (action.Action)
+                        {
+                            case UserAction.Update:
+                                UpdateRecord(connection, tableName, action.TargetId!.Value, row, excelKeys, columnNames, now);
+                                updatedCount++;
+                                Console.WriteLine($"  [更新(手動)] {furiganaValue}");
+                                break;
+                            case UserAction.Insert:
+                                InsertRecord(connection, tableName, row, excelKeys, columnNames, now);
+                                insertedCount++;
+                                Console.WriteLine($"  [新規(手動)] {furiganaValue}");
+                                break;
+                            case UserAction.Skip:
+                                skippedCount++;
+                                Console.WriteLine($"  [スキップ(手動)] {furiganaValue}");
+                                break;
+                        }
+                    }
                 }
             }
 
+            // 処理完了後、重複候補を出力
+            OutputDuplicateCandidates(connection, tableName, furiganaKey.columnName, columnNames, otherKeys);
+
             return (insertedCount, updatedCount, skippedCount);
+        }
+
+        /// <summary>
+        /// ユーザーアクションの種類
+        /// </summary>
+        private enum UserAction
+        {
+            Update,
+            Insert,
+            Skip
+        }
+
+        /// <summary>
+        /// ユーザーアクションの結果
+        /// </summary>
+        private class UserActionResult
+        {
+            public UserAction Action { get; set; }
+            public long? TargetId { get; set; }
+        }
+
+        /// <summary>
+        /// ふりがなのみでレコードを検索
+        /// </summary>
+        private List<(long id, Dictionary<string, string> data)> FindRecordsByFurigana(
+            SQLiteConnection connection, string tableName, string furiganaValue, string furiganaColumn, List<string> columnNames)
+        {
+            var results = new List<(long id, Dictionary<string, string> data)>();
+            var normalizedValue = NormalizeForComparison(furiganaValue);
+
+            var selectColumns = string.Join(", ", new[] { "id" }.Concat(columnNames.Select(c => $"[{c}]")));
+            var selectSql = $"SELECT {selectColumns} FROM [{tableName}] WHERE REPLACE(REPLACE([{furiganaColumn}], ' ', ''), '　', '') = @furigana";
+
+            using var command = connection.CreateCommand();
+            command.CommandText = selectSql;
+            command.Parameters.Add(new SQLiteParameter("@furigana", normalizedValue));
+
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                var id = reader.GetInt64(0);
+                var data = new Dictionary<string, string>();
+
+                for (int i = 0; i < columnNames.Count; i++)
+                {
+                    var value = reader.IsDBNull(i + 1) ? "" : reader.GetString(i + 1);
+                    data[columnNames[i]] = value;
+                }
+
+                results.Add((id, data));
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// ふりがな一致レコードから選挙区+政党も一致するものを抽出
+        /// </summary>
+        private List<(long id, Dictionary<string, string> data)> FindExactMatches(
+            List<(long id, Dictionary<string, string> data)> furiganaMatches,
+            Dictionary<string, string> row,
+            List<(string excelHeader, string columnName, bool isFurigana)> otherKeys)
+        {
+            return furiganaMatches.Where(match =>
+            {
+                foreach (var key in otherKeys)
+                {
+                    var excelValue = row.TryGetValue(key.excelHeader, out var ev) ? ev : "";
+                    var dbValue = match.data.TryGetValue(key.columnName, out var dv) ? dv : "";
+                    if (excelValue != dbValue)
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            }).ToList();
+        }
+
+        /// <summary>
+        /// ユーザーに更新/新規/スキップを確認
+        /// </summary>
+        private UserActionResult PromptUserForAction(
+            Dictionary<string, string> row,
+            List<(long id, Dictionary<string, string> data)> existingRecords,
+            (string excelHeader, string columnName, bool isFurigana) furiganaKey,
+            List<(string excelHeader, string columnName, bool isFurigana)> otherKeys)
+        {
+            var furiganaValue = row.TryGetValue(furiganaKey.excelHeader, out var fv) ? fv : "";
+
+            Console.WriteLine();
+            Console.WriteLine($"========================================");
+            Console.WriteLine($"[確認] ふりがな「{furiganaValue}」で {existingRecords.Count} 件の既存レコードが見つかりました。");
+            Console.WriteLine($"----------------------------------------");
+            Console.WriteLine($"【インポートデータ】");
+            foreach (var key in otherKeys)
+            {
+                var value = row.TryGetValue(key.excelHeader, out var v) ? v : "";
+                Console.WriteLine($"  {key.columnName}: {value}");
+            }
+            Console.WriteLine($"----------------------------------------");
+            Console.WriteLine($"【既存レコード】");
+            for (int i = 0; i < existingRecords.Count; i++)
+            {
+                var record = existingRecords[i];
+                Console.WriteLine($"  [{i + 1}] ID:{record.id}");
+                foreach (var key in otherKeys)
+                {
+                    var value = record.data.TryGetValue(key.columnName, out var v) ? v : "";
+                    Console.WriteLine($"      {key.columnName}: {value}");
+                }
+            }
+            Console.WriteLine($"----------------------------------------");
+            Console.WriteLine($"選択してください:");
+            for (int i = 0; i < existingRecords.Count; i++)
+            {
+                Console.WriteLine($"  {i + 1}: レコード[{i + 1}]を更新");
+            }
+            Console.WriteLine($"  N: 新規登録");
+            Console.WriteLine($"  S: スキップ");
+            Console.WriteLine($"========================================");
+
+            while (true)
+            {
+                Console.Write("入力: ");
+                var input = Console.ReadLine()?.Trim().ToUpper();
+
+                if (input == "N")
+                {
+                    return new UserActionResult { Action = UserAction.Insert };
+                }
+                else if (input == "S")
+                {
+                    return new UserActionResult { Action = UserAction.Skip };
+                }
+                else if (int.TryParse(input, out var num) && num >= 1 && num <= existingRecords.Count)
+                {
+                    return new UserActionResult
+                    {
+                        Action = UserAction.Update,
+                        TargetId = existingRecords[num - 1].id
+                    };
+                }
+                else
+                {
+                    Console.WriteLine("無効な入力です。再度入力してください。");
+                }
+            }
+        }
+
+        /// <summary>
+        /// 処理完了後、ふりがなが重複するレコードを出力
+        /// </summary>
+        private void OutputDuplicateCandidates(
+            SQLiteConnection connection, string tableName, string furiganaColumn,
+            List<string> columnNames, List<(string excelHeader, string columnName, bool isFurigana)> otherKeys)
+        {
+            // ふりがなでグループ化して2件以上あるものを取得
+            var sql = $@"
+                SELECT REPLACE(REPLACE([{furiganaColumn}], ' ', ''), '　', '') as normalized_furigana, COUNT(*) as cnt
+                FROM [{tableName}]
+                GROUP BY normalized_furigana
+                HAVING cnt > 1
+                ORDER BY cnt DESC";
+
+            var duplicateFuriganas = new List<string>();
+
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = sql;
+                using var reader = command.ExecuteReader();
+                while (reader.Read())
+                {
+                    duplicateFuriganas.Add(reader.GetString(0));
+                }
+            }
+
+            if (duplicateFuriganas.Count == 0)
+            {
+                return;
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("========================================");
+            Console.WriteLine("【重複の可能性があるデータ】");
+            Console.WriteLine("========================================");
+
+            foreach (var normalizedFurigana in duplicateFuriganas)
+            {
+                var selectColumns = string.Join(", ", new[] { "id", $"[{furiganaColumn}]" }.Concat(otherKeys.Select(k => $"[{k.columnName}]")));
+                var selectSql = $"SELECT {selectColumns} FROM [{tableName}] WHERE REPLACE(REPLACE([{furiganaColumn}], ' ', ''), '　', '') = @furigana";
+
+                using var command = connection.CreateCommand();
+                command.CommandText = selectSql;
+                command.Parameters.Add(new SQLiteParameter("@furigana", normalizedFurigana));
+
+                var records = new List<(long id, string furigana, Dictionary<string, string> data)>();
+
+                using var reader = command.ExecuteReader();
+                while (reader.Read())
+                {
+                    var id = reader.GetInt64(0);
+                    var furigana = reader.IsDBNull(1) ? "" : reader.GetString(1);
+                    var data = new Dictionary<string, string>();
+                    for (int i = 0; i < otherKeys.Count; i++)
+                    {
+                        var value = reader.IsDBNull(i + 2) ? "" : reader.GetString(i + 2);
+                        data[otherKeys[i].columnName] = value;
+                    }
+                    records.Add((id, furigana, data));
+                }
+
+                if (records.Count > 0)
+                {
+                    Console.WriteLine($"[{records[0].furigana}] {records.Count}件");
+                    foreach (var record in records)
+                    {
+                        var details = string.Join(" / ", otherKeys.Select(k => record.data.TryGetValue(k.columnName, out var v) ? v : ""));
+                        Console.WriteLine($"  - ID:{record.id} {details}");
+                    }
+                    Console.WriteLine();
+                }
+            }
         }
 
         /// <summary>
@@ -320,67 +599,6 @@ namespace ElectionPageCreateTool.Logic
                 }
             }
             return false;
-        }
-
-        /// <summary>
-        /// 既存レコードを検索してデータも取得
-        /// </summary>
-        private (long id, Dictionary<string, string> data)? FindExistingRecordWithData(SQLiteConnection connection, string tableName,
-            Dictionary<string, string> row, List<string> columnNames, ColumnMappingInfo mappingInfo)
-        {
-            var whereConditions = new List<string>();
-            var parameters = new List<SQLiteParameter>();
-
-            for (int i = 0; i < mappingInfo.UpsertKeys.Count; i++)
-            {
-                var (excelHeader, columnName, isFurigana) = mappingInfo.UpsertKeys[i];
-
-                if (row.TryGetValue(excelHeader, out var value))
-                {
-                    // ふりがなカラムの場合はスペースを除去して比較
-                    if (isFurigana)
-                    {
-                        var normalizedValue = NormalizeForComparison(value);
-                        whereConditions.Add($"REPLACE(REPLACE([{columnName}], ' ', ''), '　', '') = @key{i}");
-                        parameters.Add(new SQLiteParameter($"@key{i}", normalizedValue));
-                    }
-                    else
-                    {
-                        whereConditions.Add($"[{columnName}] = @key{i}");
-                        parameters.Add(new SQLiteParameter($"@key{i}", value));
-                    }
-                }
-            }
-
-            if (whereConditions.Count == 0)
-            {
-                return null;
-            }
-
-            // IDと全カラムを取得
-            var selectColumns = string.Join(", ", new[] { "id" }.Concat(columnNames.Select(c => $"[{c}]")));
-            var selectSql = $"SELECT {selectColumns} FROM [{tableName}] WHERE {string.Join(" AND ", whereConditions)} LIMIT 1";
-
-            using var command = connection.CreateCommand();
-            command.CommandText = selectSql;
-            command.Parameters.AddRange(parameters.ToArray());
-
-            using var reader = command.ExecuteReader();
-            if (reader.Read())
-            {
-                var id = reader.GetInt64(0);
-                var data = new Dictionary<string, string>();
-
-                for (int i = 0; i < columnNames.Count; i++)
-                {
-                    var value = reader.IsDBNull(i + 1) ? "" : reader.GetString(i + 1);
-                    data[columnNames[i]] = value;
-                }
-
-                return (id, data);
-            }
-
-            return null;
         }
 
         /// <summary>
