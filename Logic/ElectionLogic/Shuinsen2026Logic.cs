@@ -84,6 +84,9 @@ public static class Shuinsen2026Logic
 
             Console.WriteLine($"Excelから {dic.Count} 件のデータを読み込みました。");
 
+            // 無回答の正規化処理
+            NormalizeNoAnswerReasons(dic);
+
             var dbLogic = new DatabaseOperationLogic();
             var tableName = nameof(Shuinsen2026Respond);
             Console.WriteLine($"データベースファイル: {dbLogic.GetDbFilePath()}");
@@ -94,6 +97,134 @@ public static class Shuinsen2026Logic
         }
 
         Console.ReadKey();
+    }
+
+    // Excelヘッダー名の定数
+    private const string ExcelHeader_Name = "候補者名";
+    private const string ExcelHeader_NameFurigana = "候補者名（ふりがな）";
+    private const string ExcelHeader_Q1Reason = "Q1の選択肢を選んだ理由を100文字以内で回答してください";
+    private const string ExcelHeader_Q2Reason = "Q2の選択肢を選んだ理由、もしくはその他問題があると思われる規制・懸念があれば100文字以内で回答してください";
+
+    /// <summary>
+    /// 無回答判定の結果
+    /// </summary>
+    private enum NoAnswerCheckResult
+    {
+        NotNoAnswer,      // 無回答ではない
+        ExactNoAnswer,    // 完全一致で無回答
+        PartialNoAnswer   // 部分一致（確認が必要）
+    }
+
+    /// <summary>
+    /// Reasonフィールドの無回答チェック
+    /// </summary>
+    private static NoAnswerCheckResult CheckNoAnswerReason(string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            return NoAnswerCheckResult.NotNoAnswer;
+
+        var trimmed = reason.Trim();
+        if (trimmed == "無回答")
+            return NoAnswerCheckResult.ExactNoAnswer;
+
+        if (trimmed.Contains("無回答"))
+            return NoAnswerCheckResult.PartialNoAnswer;
+
+        return NoAnswerCheckResult.NotNoAnswer;
+    }
+
+    /// <summary>
+    /// 無回答を含むReasonの正規化処理
+    /// </summary>
+    private static void NormalizeNoAnswerReasons(List<Dictionary<string, string>> data)
+    {
+        var hasPartialMatch = false;
+
+        // まず部分一致があるかチェック
+        foreach (var row in data)
+        {
+            var q1Reason = row.GetValueOrDefault(ExcelHeader_Q1Reason, "");
+            var q2Reason = row.GetValueOrDefault(ExcelHeader_Q2Reason, "");
+
+            if (CheckNoAnswerReason(q1Reason) == NoAnswerCheckResult.PartialNoAnswer ||
+                CheckNoAnswerReason(q2Reason) == NoAnswerCheckResult.PartialNoAnswer)
+            {
+                hasPartialMatch = true;
+                break;
+            }
+        }
+
+        if (!hasPartialMatch)
+        {
+            return;
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("========================================");
+        Console.WriteLine("【無回答の確認】");
+        Console.WriteLine("「無回答」を含むが完全一致ではない回答があります。");
+        Console.WriteLine("========================================");
+
+        foreach (var row in data)
+        {
+            var name = row.GetValueOrDefault(ExcelHeader_Name, "");
+            var nameFurigana = row.GetValueOrDefault(ExcelHeader_NameFurigana, "");
+            var q1Reason = row.GetValueOrDefault(ExcelHeader_Q1Reason, "");
+            var q2Reason = row.GetValueOrDefault(ExcelHeader_Q2Reason, "");
+
+            var q1Check = CheckNoAnswerReason(q1Reason);
+            var q2Check = CheckNoAnswerReason(q2Reason);
+
+            // 部分一致がある場合のみ確認
+            if (q1Check == NoAnswerCheckResult.PartialNoAnswer ||
+                q2Check == NoAnswerCheckResult.PartialNoAnswer)
+            {
+                Console.WriteLine();
+                Console.WriteLine($"----------------------------------------");
+                Console.WriteLine($"候補者: {name}（{nameFurigana}）");
+                Console.WriteLine($"----------------------------------------");
+
+                // Q1Reasonの確認
+                if (q1Check == NoAnswerCheckResult.PartialNoAnswer)
+                {
+                    Console.WriteLine($"Q1Reason: 「{q1Reason}」");
+                    Console.Write("  → 「無回答」として扱いますか？ (Y/N): ");
+                    var input = Console.ReadLine()?.Trim().ToUpper();
+                    if (input == "Y")
+                    {
+                        row[ExcelHeader_Q1Reason] = "無回答";
+                        Console.WriteLine("  → 「無回答」に正規化しました。");
+                    }
+                    else
+                    {
+                        Console.WriteLine("  → そのまま保持します。");
+                    }
+                }
+
+                // Q2Reasonの確認
+                if (q2Check == NoAnswerCheckResult.PartialNoAnswer)
+                {
+                    Console.WriteLine($"Q2Reason: 「{q2Reason}」");
+                    Console.Write("  → 「無回答」として扱いますか？ (Y/N): ");
+                    var input = Console.ReadLine()?.Trim().ToUpper();
+                    if (input == "Y")
+                    {
+                        row[ExcelHeader_Q2Reason] = "無回答";
+                        Console.WriteLine("  → 「無回答」に正規化しました。");
+                    }
+                    else
+                    {
+                        Console.WriteLine("  → そのまま保持します。");
+                    }
+                }
+            }
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("========================================");
+        Console.WriteLine("無回答の確認が完了しました。");
+        Console.WriteLine("========================================");
+        Console.WriteLine();
     }
 
     private static void ExportFromDatabase()
