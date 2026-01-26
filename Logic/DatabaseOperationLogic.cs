@@ -299,11 +299,12 @@ namespace ElectionPageCreateTool.Logic
                     {
                         // 選挙区+政党も一致する1件 → 値比較して更新orスキップ
                         var match = exactMatches[0];
-                        if (HasChanges(row, match.data, excelKeys, columnNames))
+                        var changes = GetChanges(row, match.data, excelKeys, columnNames);
+                        if (changes.Count > 0)
                         {
                             UpdateRecord(connection, tableName, match.id, row, excelKeys, columnNames, now);
                             updatedCount++;
-                            Console.WriteLine($"  [更新] {furiganaValue}");
+                            OutputChanges($"更新: {furiganaValue}", changes);
                         }
                         else
                         {
@@ -315,10 +316,12 @@ namespace ElectionPageCreateTool.Logic
                         // 選挙区+政党一致が複数件（通常ありえないが念のため）
                         Console.WriteLine($"  [警告] 完全一致レコードが複数見つかりました: {furiganaValue}");
                         var match = exactMatches[0]; // 最初の1件を更新
-                        if (HasChanges(row, match.data, excelKeys, columnNames))
+                        var changes = GetChanges(row, match.data, excelKeys, columnNames);
+                        if (changes.Count > 0)
                         {
                             UpdateRecord(connection, tableName, match.id, row, excelKeys, columnNames, now);
                             updatedCount++;
+                            OutputChanges($"更新: {furiganaValue}", changes);
                         }
                         else
                         {
@@ -333,9 +336,19 @@ namespace ElectionPageCreateTool.Logic
                         switch (action.Action)
                         {
                             case UserAction.Update:
+                                // 選択されたレコードのデータを取得して変更内容を表示
+                                var selectedRecord = furiganaMatches.FirstOrDefault(r => r.id == action.TargetId!.Value);
                                 UpdateRecord(connection, tableName, action.TargetId!.Value, row, excelKeys, columnNames, now);
                                 updatedCount++;
-                                Console.WriteLine($"  [更新(手動)] {furiganaValue}");
+                                if (selectedRecord != default)
+                                {
+                                    var manualChanges = GetChanges(row, selectedRecord.data, excelKeys, columnNames);
+                                    OutputChanges($"更新(手動): {furiganaValue}", manualChanges);
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"  [更新(手動)] {furiganaValue}");
+                                }
                                 break;
                             case UserAction.Insert:
                                 InsertRecord(connection, tableName, row, excelKeys, columnNames, now);
@@ -585,6 +598,18 @@ namespace ElectionPageCreateTool.Logic
         private bool HasChanges(Dictionary<string, string> excelRow, Dictionary<string, string> dbRow,
             List<string> excelKeys, List<string> columnNames)
         {
+            return GetChanges(excelRow, dbRow, excelKeys, columnNames).Count > 0;
+        }
+
+        /// <summary>
+        /// ExcelデータとDBデータを比較して変更内容を取得
+        /// </summary>
+        private List<(string columnName, string oldValue, string newValue)> GetChanges(
+            Dictionary<string, string> excelRow, Dictionary<string, string> dbRow,
+            List<string> excelKeys, List<string> columnNames)
+        {
+            var changes = new List<(string columnName, string oldValue, string newValue)>();
+
             for (var i = 0; i < excelKeys.Count; i++)
             {
                 var excelKey = excelKeys[i];
@@ -595,10 +620,37 @@ namespace ElectionPageCreateTool.Logic
 
                 if (excelValue != dbValue)
                 {
-                    return true;
+                    changes.Add((dbColumn, dbValue, excelValue));
                 }
             }
-            return false;
+
+            return changes;
+        }
+
+        /// <summary>
+        /// 変更内容をコンソールに出力
+        /// </summary>
+        private void OutputChanges(string label, List<(string columnName, string oldValue, string newValue)> changes)
+        {
+            Console.WriteLine($"  [{label}]");
+            foreach (var (columnName, oldValue, newValue) in changes)
+            {
+                var oldDisplay = string.IsNullOrEmpty(oldValue) ? "(空)" : Truncate(oldValue, 30);
+                var newDisplay = string.IsNullOrEmpty(newValue) ? "(空)" : Truncate(newValue, 30);
+                Console.WriteLine($"    {columnName}: 「{oldDisplay}」→「{newDisplay}」");
+            }
+        }
+
+        /// <summary>
+        /// 文字列を指定長で切り詰め
+        /// </summary>
+        private string Truncate(string value, int maxLength)
+        {
+            if (string.IsNullOrEmpty(value)) return value;
+            // 改行を除去
+            var singleLine = value.Replace("\r", "").Replace("\n", " ");
+            if (singleLine.Length <= maxLength) return singleLine;
+            return singleLine.Substring(0, maxLength) + "...";
         }
 
         /// <summary>
