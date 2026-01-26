@@ -84,11 +84,14 @@ public static class Shuinsen2026Logic
 
             Console.WriteLine($"Excelから {dic.Count} 件のデータを読み込みました。");
 
-            // 無回答の正規化処理
-            NormalizeNoAnswerReasons(dic);
-
+            // DBから現在のデータを取得（無回答確認スキップ判定用）
             var dbLogic = new DatabaseOperationLogic();
             var tableName = nameof(Shuinsen2026Respond);
+            var currentDbData = dbLogic.GetAllData<Shuinsen2026Respond>(tableName);
+
+            // 無回答の正規化処理
+            NormalizeNoAnswerReasons(dic, currentDbData);
+
             Console.WriteLine($"データベースファイル: {dbLogic.GetDbFilePath()}");
             Console.WriteLine($"テーブル名: {tableName}");
             dbLogic.ShowUpsertKeyColumns<Shuinsen2026Respond>();
@@ -136,25 +139,67 @@ public static class Shuinsen2026Logic
     /// <summary>
     /// 無回答を含むReasonの正規化処理
     /// </summary>
-    private static void NormalizeNoAnswerReasons(List<Dictionary<string, string>> data)
+    /// <param name="data">Excelから読み込んだデータ</param>
+    /// <param name="currentDbData">DBの現在データ（確認スキップ判定用）</param>
+    private static void NormalizeNoAnswerReasons(List<Dictionary<string, string>> data, List<Shuinsen2026Respond> currentDbData)
     {
-        var hasPartialMatch = false;
+        // DBデータをふりがなでインデックス化（高速検索用）
+        var dbByFurigana = currentDbData
+            .GroupBy(r => r.NameFurigana?.Trim() ?? "")
+            .ToDictionary(g => g.Key, g => g.ToList());
 
-        // まず部分一致があるかチェック
+        var needsUserConfirmation = new List<(Dictionary<string, string> row, bool q1NeedsConfirm, bool q2NeedsConfirm)>();
+
+        // 部分一致かつDBで未正規化のものを抽出
         foreach (var row in data)
         {
+            var nameFurigana = row.GetValueOrDefault(ExcelHeader_NameFurigana, "")?.Trim() ?? "";
             var q1Reason = row.GetValueOrDefault(ExcelHeader_Q1Reason, "");
             var q2Reason = row.GetValueOrDefault(ExcelHeader_Q2Reason, "");
 
-            if (CheckNoAnswerReason(q1Reason) == NoAnswerCheckResult.PartialNoAnswer ||
-                CheckNoAnswerReason(q2Reason) == NoAnswerCheckResult.PartialNoAnswer)
+            var q1Check = CheckNoAnswerReason(q1Reason);
+            var q2Check = CheckNoAnswerReason(q2Reason);
+
+            var q1NeedsConfirm = false;
+            var q2NeedsConfirm = false;
+
+            // Q1の部分一致チェック
+            if (q1Check == NoAnswerCheckResult.PartialNoAnswer)
             {
-                hasPartialMatch = true;
-                break;
+                // DBに該当レコードがあり、既に「無回答」なら自動正規化
+                if (dbByFurigana.TryGetValue(nameFurigana, out var dbRecords) &&
+                    dbRecords.Any(r => r.Q1Reason == "無回答"))
+                {
+                    row[ExcelHeader_Q1Reason] = "無回答";
+                }
+                else
+                {
+                    q1NeedsConfirm = true;
+                }
+            }
+
+            // Q2の部分一致チェック
+            if (q2Check == NoAnswerCheckResult.PartialNoAnswer)
+            {
+                // DBに該当レコードがあり、既に「無回答」なら自動正規化
+                if (dbByFurigana.TryGetValue(nameFurigana, out var dbRecords) &&
+                    dbRecords.Any(r => r.Q2Reason == "無回答"))
+                {
+                    row[ExcelHeader_Q2Reason] = "無回答";
+                }
+                else
+                {
+                    q2NeedsConfirm = true;
+                }
+            }
+
+            if (q1NeedsConfirm || q2NeedsConfirm)
+            {
+                needsUserConfirmation.Add((row, q1NeedsConfirm, q2NeedsConfirm));
             }
         }
 
-        if (!hasPartialMatch)
+        if (needsUserConfirmation.Count == 0)
         {
             return;
         }
@@ -163,59 +208,52 @@ public static class Shuinsen2026Logic
         Console.WriteLine("========================================");
         Console.WriteLine("【無回答の確認】");
         Console.WriteLine("「無回答」を含むが完全一致ではない回答があります。");
+        Console.WriteLine("（DBで既に正規化済みのものは自動スキップ）");
         Console.WriteLine("========================================");
 
-        foreach (var row in data)
+        foreach (var (row, q1NeedsConfirm, q2NeedsConfirm) in needsUserConfirmation)
         {
             var name = row.GetValueOrDefault(ExcelHeader_Name, "");
             var nameFurigana = row.GetValueOrDefault(ExcelHeader_NameFurigana, "");
-            var q1Reason = row.GetValueOrDefault(ExcelHeader_Q1Reason, "");
-            var q2Reason = row.GetValueOrDefault(ExcelHeader_Q2Reason, "");
 
-            var q1Check = CheckNoAnswerReason(q1Reason);
-            var q2Check = CheckNoAnswerReason(q2Reason);
+            Console.WriteLine();
+            Console.WriteLine($"----------------------------------------");
+            Console.WriteLine($"候補者: {name}（{nameFurigana}）");
+            Console.WriteLine($"----------------------------------------");
 
-            // 部分一致がある場合のみ確認
-            if (q1Check == NoAnswerCheckResult.PartialNoAnswer ||
-                q2Check == NoAnswerCheckResult.PartialNoAnswer)
+            // Q1Reasonの確認
+            if (q1NeedsConfirm)
             {
-                Console.WriteLine();
-                Console.WriteLine($"----------------------------------------");
-                Console.WriteLine($"候補者: {name}（{nameFurigana}）");
-                Console.WriteLine($"----------------------------------------");
-
-                // Q1Reasonの確認
-                if (q1Check == NoAnswerCheckResult.PartialNoAnswer)
+                var q1Reason = row.GetValueOrDefault(ExcelHeader_Q1Reason, "");
+                Console.WriteLine($"Q1Reason: 「{q1Reason}」");
+                Console.Write("  → 「無回答」として扱いますか？ (Y/N): ");
+                var input = Console.ReadLine()?.Trim().ToUpper();
+                if (input == "Y")
                 {
-                    Console.WriteLine($"Q1Reason: 「{q1Reason}」");
-                    Console.Write("  → 「無回答」として扱いますか？ (Y/N): ");
-                    var input = Console.ReadLine()?.Trim().ToUpper();
-                    if (input == "Y")
-                    {
-                        row[ExcelHeader_Q1Reason] = "無回答";
-                        Console.WriteLine("  → 「無回答」に正規化しました。");
-                    }
-                    else
-                    {
-                        Console.WriteLine("  → そのまま保持します。");
-                    }
+                    row[ExcelHeader_Q1Reason] = "無回答";
+                    Console.WriteLine("  → 「無回答」に正規化しました。");
                 }
-
-                // Q2Reasonの確認
-                if (q2Check == NoAnswerCheckResult.PartialNoAnswer)
+                else
                 {
-                    Console.WriteLine($"Q2Reason: 「{q2Reason}」");
-                    Console.Write("  → 「無回答」として扱いますか？ (Y/N): ");
-                    var input = Console.ReadLine()?.Trim().ToUpper();
-                    if (input == "Y")
-                    {
-                        row[ExcelHeader_Q2Reason] = "無回答";
-                        Console.WriteLine("  → 「無回答」に正規化しました。");
-                    }
-                    else
-                    {
-                        Console.WriteLine("  → そのまま保持します。");
-                    }
+                    Console.WriteLine("  → そのまま保持します。");
+                }
+            }
+
+            // Q2Reasonの確認
+            if (q2NeedsConfirm)
+            {
+                var q2Reason = row.GetValueOrDefault(ExcelHeader_Q2Reason, "");
+                Console.WriteLine($"Q2Reason: 「{q2Reason}」");
+                Console.Write("  → 「無回答」として扱いますか？ (Y/N): ");
+                var input = Console.ReadLine()?.Trim().ToUpper();
+                if (input == "Y")
+                {
+                    row[ExcelHeader_Q2Reason] = "無回答";
+                    Console.WriteLine("  → 「無回答」に正規化しました。");
+                }
+                else
+                {
+                    Console.WriteLine("  → そのまま保持します。");
                 }
             }
         }
