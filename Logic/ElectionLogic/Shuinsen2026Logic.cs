@@ -84,6 +84,18 @@ public static class Shuinsen2026Logic
 
             Console.WriteLine($"Excelから {dic.Count} 件のデータを読み込みました。");
 
+            // Excel内の重複レコードを排除（同一人物の複数回答は最新のみ採用）
+            dic = DeduplicateExcelData(dic);
+
+            if (dic.Count == 0)
+            {
+                Console.WriteLine("処理対象のデータがありません。");
+                Console.ReadKey();
+                return;
+            }
+
+            Console.WriteLine($"重複排除後: {dic.Count} 件");
+
             // DBから現在のデータを取得（無回答確認スキップ判定用）
             var dbLogic = new DatabaseOperationLogic();
             var tableName = nameof(Shuinsen2026Respond);
@@ -105,8 +117,61 @@ public static class Shuinsen2026Logic
     // Excelヘッダー名の定数
     private const string ExcelHeader_Name = "候補者名";
     private const string ExcelHeader_NameFurigana = "候補者名（ふりがな）";
+    private const string ExcelHeader_Constituency = "選挙区詳細";
+    private const string ExcelHeader_PartyName = "公認を受けている政党・政治団体";
     private const string ExcelHeader_Q1Reason = "Q1の選択肢を選んだ理由を100文字以内で回答してください";
     private const string ExcelHeader_Q2Reason = "Q2の選択肢を選んだ理由、もしくはその他問題があると思われる規制・懸念があれば100文字以内で回答してください";
+
+    /// <summary>
+    /// Excel内の重複レコードを排除し、最新（最後）のレコードのみを残す
+    /// </summary>
+    /// <param name="data">Excelから読み込んだデータ</param>
+    /// <returns>重複排除後のデータ</returns>
+    private static List<Dictionary<string, string>> DeduplicateExcelData(List<Dictionary<string, string>> data)
+    {
+        // Upsertキー（ふりがな+選挙区+政党）でグループ化
+        var grouped = data
+            .Select((row, index) => (row, index))
+            .GroupBy(x => (
+                Furigana: x.row.GetValueOrDefault(ExcelHeader_NameFurigana, "")?.Trim() ?? "",
+                Constituency: x.row.GetValueOrDefault(ExcelHeader_Constituency, "")?.Trim() ?? "",
+                Party: x.row.GetValueOrDefault(ExcelHeader_PartyName, "")?.Trim() ?? ""
+            ))
+            .ToList();
+
+        var duplicates = grouped.Where(g => g.Count() > 1).ToList();
+
+        if (duplicates.Count > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine("========================================");
+            Console.WriteLine("【重複レコードの検出】");
+            Console.WriteLine("同一人物の複数回答が検出されました。最新の回答を採用します。");
+            Console.WriteLine("========================================");
+
+            foreach (var dup in duplicates)
+            {
+                var records = dup.OrderBy(x => x.index).ToList();
+                var latest = records.Last();
+                var name = latest.row.GetValueOrDefault(ExcelHeader_Name, "");
+
+                Console.WriteLine($"  {name}（{dup.Key.Furigana}）- {dup.Key.Constituency} - {dup.Key.Party}");
+                Console.WriteLine($"    → {records.Count}件中、最新の回答（行{latest.index + 2}）を採用");
+            }
+
+            Console.WriteLine("========================================");
+            Console.WriteLine();
+        }
+
+        // 各グループの最後のレコード（最新）を取得し、元の順序を維持
+        var deduplicatedData = grouped
+            .Select(g => g.OrderBy(x => x.index).Last())
+            .OrderBy(x => x.index)
+            .Select(x => x.row)
+            .ToList();
+
+        return deduplicatedData;
+    }
 
     /// <summary>
     /// 無回答判定の結果
