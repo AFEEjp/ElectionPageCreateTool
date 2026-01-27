@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using ClosedXML.Excel;
 using ElectionPageCreateTool.Extensions;
 using ElectionPageCreateTool.Model;
@@ -96,6 +97,9 @@ public static class Shuinsen2026Logic
 
             Console.WriteLine($"重複排除後: {dic.Count} 件");
 
+            // 修正ルールの適用（corrections.jsonに定義された修正を適用）
+            dic = ApplyCorrections(dic);
+
             // DBから現在のデータを取得（無回答確認スキップ判定用）
             var dbLogic = new DatabaseOperationLogic();
             var tableName = nameof(Shuinsen2026Respond);
@@ -121,6 +125,106 @@ public static class Shuinsen2026Logic
     private const string ExcelHeader_PartyName = "公認を受けている政党・政治団体";
     private const string ExcelHeader_Q1Reason = "Q1の選択肢を選んだ理由を100文字以内で回答してください";
     private const string ExcelHeader_Q2Reason = "Q2の選択肢を選んだ理由、もしくはその他問題があると思われる規制・懸念があれば100文字以内で回答してください";
+
+    /// <summary>
+    /// 修正ルールをJSONファイルから読み込んで適用する
+    /// </summary>
+    /// <param name="data">Excelから読み込んだデータ</param>
+    /// <returns>修正適用後のデータ</returns>
+    private static List<Dictionary<string, string>> ApplyCorrections(List<Dictionary<string, string>> data)
+    {
+        var correctionsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "corrections.json");
+        if (!File.Exists(correctionsPath))
+        {
+            return data;
+        }
+
+        try
+        {
+            var jsonContent = File.ReadAllText(correctionsPath);
+            using var document = JsonDocument.Parse(jsonContent);
+
+            if (!document.RootElement.TryGetProperty("Corrections", out var corrections))
+            {
+                return data;
+            }
+
+            var appliedCount = 0;
+
+            foreach (var correction in corrections.EnumerateArray())
+            {
+                if (!correction.TryGetProperty("Match", out var matchConditions) ||
+                    !correction.TryGetProperty("Replace", out var replaceValues))
+                {
+                    continue;
+                }
+
+                // 各データ行に対してマッチングを確認
+                foreach (var row in data)
+                {
+                    var isMatch = true;
+
+                    // すべてのMatch条件を確認
+                    foreach (var condition in matchConditions.EnumerateObject())
+                    {
+                        var key = condition.Name;
+                        var expectedValue = condition.Value.GetString() ?? string.Empty;
+
+                        if (!row.TryGetValue(key, out var actualValue) ||
+                            actualValue?.Trim() != expectedValue.Trim())
+                        {
+                            isMatch = false;
+                            break;
+                        }
+                    }
+
+                    // マッチした場合、Replace値を適用
+                    if (isMatch)
+                    {
+                        var name = row.GetValueOrDefault(ExcelHeader_Name, "");
+                        var replacedFields = new List<string>();
+
+                        foreach (var replace in replaceValues.EnumerateObject())
+                        {
+                            var key = replace.Name;
+                            var newValue = replace.Value.GetString() ?? string.Empty;
+
+                            if (row.ContainsKey(key))
+                            {
+                                var oldValue = row[key];
+                                if (oldValue != newValue)
+                                {
+                                    row[key] = newValue;
+                                    replacedFields.Add($"{key}: 「{oldValue}」→「{newValue}」");
+                                }
+                            }
+                        }
+
+                        if (replacedFields.Count > 0)
+                        {
+                            appliedCount++;
+                            Console.WriteLine($"  修正適用: {name}");
+                            foreach (var field in replacedFields)
+                            {
+                                Console.WriteLine($"    {field}");
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (appliedCount > 0)
+            {
+                Console.WriteLine($"修正ルール適用: {appliedCount} 件");
+            }
+        }
+        catch (JsonException ex)
+        {
+            Console.WriteLine($"corrections.json の解析エラー: {ex.Message}");
+        }
+
+        return data;
+    }
 
     /// <summary>
     /// Excel内の重複レコードを排除し、最新（最後）のレコードのみを残す
