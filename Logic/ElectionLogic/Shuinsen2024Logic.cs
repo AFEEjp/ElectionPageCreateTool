@@ -6,7 +6,7 @@ using ElectionPageCreateTool.Model.Shuinsen2024;
 
 namespace ElectionPageCreateTool.Logic.ElectionLogic;
 
-public class Shuinsen2024Logic
+public static class Shuinsen2024Logic
 {
     public static void MainLogic()
     {

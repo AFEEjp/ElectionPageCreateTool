@@ -593,15 +593,6 @@ namespace ElectionPageCreateTool.Logic
         }
 
         /// <summary>
-        /// ExcelデータとDBデータを比較して変更があるか確認
-        /// </summary>
-        private bool HasChanges(Dictionary<string, string> excelRow, Dictionary<string, string> dbRow,
-            List<string> excelKeys, List<string> columnNames)
-        {
-            return GetChanges(excelRow, dbRow, excelKeys, columnNames).Count > 0;
-        }
-
-        /// <summary>
         /// ExcelデータとDBデータを比較して変更内容を取得
         /// </summary>
         private List<(string columnName, string oldValue, string newValue)> GetChanges(

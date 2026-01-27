@@ -70,7 +70,7 @@ namespace ElectionPageCreateTool.Logic
             // 出力パスが指定されていない場合、元のファイル名に "_merged" を追加
             if (string.IsNullOrEmpty(outputPath))
             {
-                var directory = Path.GetDirectoryName(mainFilePath);
+                var directory = Path.GetDirectoryName(mainFilePath) ?? string.Empty;
                 var fileName = Path.GetFileNameWithoutExtension(mainFilePath) + "_merged" + Path.GetExtension(mainFilePath);
                 outputPath = Path.Combine(directory, fileName);
             }

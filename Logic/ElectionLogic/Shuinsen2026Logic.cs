@@ -330,9 +330,12 @@ public static class Shuinsen2026Logic
         Console.WriteLine();
     }
 
-    private static void ExportFromDatabase()
+    /// <summary>
+    /// 出力先ディレクトリを取得する共通メソッド
+    /// </summary>
+    /// <returns>出力先ディレクトリパス。取得できない場合はnull</returns>
+    private static string? GetOutputDirectoryPath()
     {
-        // 環境変数から出力先ディレクトリを取得
         var configuration = new ConfigurationBuilder()
             .SetBasePath(AppDomain.CurrentDomain.BaseDirectory)
             .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
@@ -340,7 +343,6 @@ public static class Shuinsen2026Logic
 
         var directoryPath = configuration["OutputSettings:DirectoryPath"];
 
-        // 環境変数に設定がない場合は入力を求める
         if (string.IsNullOrEmpty(directoryPath))
         {
             Console.WriteLine("出力先ディレクトリを入力してください:");
@@ -349,7 +351,7 @@ public static class Shuinsen2026Logic
             if (string.IsNullOrEmpty(directoryPath))
             {
                 Console.WriteLine("出力先ディレクトリが指定されていません。");
-                return;
+                return null;
             }
         }
         else
@@ -360,6 +362,17 @@ public static class Shuinsen2026Logic
         if (!Directory.Exists(directoryPath))
         {
             Directory.CreateDirectory(directoryPath);
+        }
+
+        return directoryPath;
+    }
+
+    private static void ExportFromDatabase()
+    {
+        var directoryPath = GetOutputDirectoryPath();
+        if (directoryPath == null)
+        {
+            return;
         }
 
         var dbLogic = new DatabaseOperationLogic();
@@ -558,34 +571,10 @@ public static class Shuinsen2026Logic
 
     private static void Generate()
     {
-        // 環境変数から出力先ディレクトリを取得
-        var configuration = new ConfigurationBuilder()
-            .SetBasePath(AppDomain.CurrentDomain.BaseDirectory)
-            .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-            .Build();
-
-        var directoryPath = configuration["OutputSettings:DirectoryPath"];
-
-        // 環境変数に設定がない場合は入力を求める
-        if (string.IsNullOrEmpty(directoryPath))
+        var directoryPath = GetOutputDirectoryPath();
+        if (directoryPath == null)
         {
-            Console.WriteLine("出力先ディレクトリを入力してください:");
-            directoryPath = Console.ReadLine();
-
-            if (string.IsNullOrEmpty(directoryPath))
-            {
-                Console.WriteLine("出力先ディレクトリが指定されていません。");
-                return;
-            }
-        }
-        else
-        {
-            Console.WriteLine($"出力先ディレクトリ: {directoryPath}");
-        }
-
-        if (!Directory.Exists(directoryPath))
-        {
-            Directory.CreateDirectory(directoryPath);
+            return;
         }
 
         // DBからデータを取得
