@@ -786,6 +786,44 @@ public static class Shuinsen2026Logic
 
         Console.WriteLine("小選挙区HTMLを出力しました。");
 
+        // Liteフォルダに都道府県単位でHTMLを出力
+        var liteDirectoryPath = Path.Combine(directoryPath, "Lite");
+        if (!Directory.Exists(liteDirectoryPath))
+        {
+            Directory.CreateDirectory(liteDirectoryPath);
+        }
+
+        foreach (var vt in 小選挙区出力内容Dic)
+        {
+            var prefStrBldr = new StringBuilder();
+            prefStrBldr.AppendLine($"<div class='district-section'>");
+            prefStrBldr.AppendLine($"<h3 id='pref-{vt.都道府県名.ToString().ToLower()}'>{vt.都道府県名.GetDescription()}</h3>");
+            prefStrBldr.AppendLine("<div>");
+
+            foreach (var kv in vt.候補者情報リスト)
+            {
+                prefStrBldr.AppendLine($"<div class='kuwari-section'>");
+                prefStrBldr.AppendLine($"<h4 id='kuwari-{kv.Key.EnStr}'>{kv.Key.JpStr}</h4>");
+                prefStrBldr.AppendLine("<div class='kohosya-info'><ol class='distList'>");
+
+                foreach (var resp in kv.Value)
+                {
+                    prefStrBldr.AppendCandidateInfoHtml(resp);
+                }
+
+                prefStrBldr.AppendLine("</ol></div>");
+                prefStrBldr.AppendLine("</div>");
+            }
+
+            prefStrBldr.AppendLine("</div>");
+            prefStrBldr.AppendLine("</div>");
+
+            var prefFileName = $"{vt.都道府県名.ToString().ToLower()}.html";
+            File.WriteAllText(Path.Combine(liteDirectoryPath, prefFileName), prefStrBldr.ToString());
+        }
+
+        Console.WriteLine($"Liteフォルダに都道府県別HTMLを出力しました。（{小選挙区出力内容Dic.Count}件）");
+
         strBldr.Clear();
 
         // 比例ブロックごとに候補者情報を分ける
