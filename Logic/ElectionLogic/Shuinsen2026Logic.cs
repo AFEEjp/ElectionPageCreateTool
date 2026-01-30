@@ -97,9 +97,6 @@ public static class Shuinsen2026Logic
 
             Console.WriteLine($"重複排除後: {dic.Count} 件");
 
-            // 修正ルールの適用（corrections.jsonに定義された修正を適用）
-            dic = ApplyCorrections(dic);
-
             // DBから現在のデータを取得（無回答確認スキップ判定用）
             var dbLogic = new DatabaseOperationLogic();
             var tableName = nameof(Shuinsen2026Respond);
@@ -107,6 +104,12 @@ public static class Shuinsen2026Logic
 
             // 無回答の正規化処理
             NormalizeNoAnswerReasons(dic, currentDbData);
+
+            // Reasonが「無回答」の場合、対応するAnswerも「無回答」に置き換え
+            ReplaceAnswerForNoAnswerReason(dic);
+
+            // 修正ルールの適用（corrections.jsonに定義された最終調整）
+            dic = ApplyCorrections(dic);
 
             Console.WriteLine($"データベースファイル: {dbLogic.GetDbFilePath()}");
             Console.WriteLine($"テーブル名: {tableName}");
@@ -123,8 +126,31 @@ public static class Shuinsen2026Logic
     private const string ExcelHeader_NameFurigana = "候補者名（ふりがな）";
     private const string ExcelHeader_Constituency = "選挙区詳細";
     private const string ExcelHeader_PartyName = "公認を受けている政党・政治団体";
+    private const string ExcelHeader_Q1Answer = "【Q1】未成年に見えるキャラクターに対する性的・暴力的な表現があるマンガ・アニメ・ゲームなどの作品の創作・公開・所持について、どのような対応が望ましいと考えますか？";
     private const string ExcelHeader_Q1Reason = "Q1の選択肢を選んだ理由を100文字以内で回答してください";
+    private const string ExcelHeader_Q2Answer = "【Q2】以下の項目のうち、「表現の自由を必要以上に損ねている」または「表現の自由に過度に抵触する可能性がある」と思うものをすべてお選びください（複数選択可）";
     private const string ExcelHeader_Q2Reason = "Q2の選択肢を選んだ理由、もしくはその他問題があると思われる規制・懸念があれば100文字以内で回答してください";
+
+    /// <summary>
+    /// Reasonが「無回答」の場合、対応するAnswerも「無回答」に置き換える
+    /// </summary>
+    private static void ReplaceAnswerForNoAnswerReason(List<Dictionary<string, string>> data)
+    {
+        foreach (var row in data)
+        {
+            var q1Reason = row.GetValueOrDefault(ExcelHeader_Q1Reason, "");
+            if (q1Reason == "無回答" && row.ContainsKey(ExcelHeader_Q1Answer))
+            {
+                row[ExcelHeader_Q1Answer] = "無回答";
+            }
+
+            var q2Reason = row.GetValueOrDefault(ExcelHeader_Q2Reason, "");
+            if (q2Reason == "無回答" && row.ContainsKey(ExcelHeader_Q2Answer))
+            {
+                row[ExcelHeader_Q2Answer] = "無回答";
+            }
+        }
+    }
 
     /// <summary>
     /// 修正ルールをJSONファイルから読み込んで適用する
@@ -606,7 +632,6 @@ public static class Shuinsen2026Logic
 
     /// <summary>
     /// Excel出力用の値変換ロジック
-    /// Q1Reason/Q2Reasonが"無回答"の場合は"無回答"に置き換え、
     /// Q2Answerはアルファベット付きで改行区切りにフォーマット
     /// 生年月日は日付のみにフォーマット
     /// </summary>
@@ -614,8 +639,6 @@ public static class Shuinsen2026Logic
     {
         return propertyName switch
         {
-            "Q1Answer" when item.Q1Reason == "無回答" => "無回答",
-            "Q2Answer" when item.Q2Reason == "無回答" => "無回答",
             "Q2Answer" => FormatQ2AnswerForExcel(value),
             "Birthdate" => FormatDateOnly(value),
             _ => value
@@ -833,10 +856,10 @@ public static class Shuinsen2026Logic
     public static StringBuilder AppendCandidateInfoHtml(this StringBuilder strBuilder, Shuinsen2026Respond resp)
     {
         // Q1/Q2の回答をdata属性用にアルファベットコードに変換
-        var q1DataValue = resp.Q1Reason == "無回答"
+        var q1DataValue = resp.Q1Answer == "無回答"
             ? "無回答"
             : Q1ChoiceOrder.TryGetValue(resp.Q1Answer.Trim(), out var q1Code) ? q1Code : resp.Q1Answer;
-        var q2DataValue = resp.Q2Reason == "無回答"
+        var q2DataValue = resp.Q2Answer == "無回答"
             ? "無回答"
             : ConvertQ2AnswerToCodes(resp.Q2Answer);
 
@@ -855,13 +878,10 @@ public static class Shuinsen2026Logic
             strBuilder.AppendLine($"<li class='birthdate'><b>誕生日：</b><br>{birthdate:yyyy/MM/dd} （{age}歳）</li>");
         }
 
-        // Q1Reasonが"無回答"の場合はQ1Answerも"無回答"として出力
-        var q1Answer = resp.Q1Reason == "無回答" ? "無回答" : resp.Q1Answer;
-        strBuilder.AppendLine($"<li class='setsumon'><b>設問（1-a）：</b>{q1Answer}</li>");
+        strBuilder.AppendLine($"<li class='setsumon'><b>設問（1-a）：</b>{resp.Q1Answer}</li>");
         strBuilder.AppendLine($"<li class='setsumon'><b>設問（1-b）：</b>{resp.Q1Reason}</li>");
 
-        // Q2Reasonが"無回答"の場合はQ2Answerも"無回答"として出力
-        var q2AnswerDisplay = resp.Q2Reason == "無回答" ? "無回答" : FormatQ2AnswerAsList(resp.Q2Answer);
+        var q2AnswerDisplay = resp.Q2Answer == "無回答" ? "無回答" : FormatQ2AnswerAsList(resp.Q2Answer);
         strBuilder.AppendLine($"<li class='setsumon'><b>設問（2-a）：</b>{q2AnswerDisplay}</li>");
         strBuilder.AppendLine($"<li class='setsumon'><b>設問（2-b）：</b>{resp.Q2Reason}</li>");
         strBuilder.AppendLine($"<li class='setsumon'><b>設問（3）：</b>{resp.FavoriteMangaAnimeGame}</li>");
