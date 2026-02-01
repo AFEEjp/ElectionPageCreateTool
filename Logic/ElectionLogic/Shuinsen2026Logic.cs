@@ -786,11 +786,11 @@ public static class Shuinsen2026Logic
 
         Console.WriteLine("小選挙区HTMLを出力しました。");
 
-        // Liteフォルダに都道府県単位でHTMLを出力
-        var liteDirectoryPath = Path.Combine(directoryPath, "Lite");
-        if (!Directory.Exists(liteDirectoryPath))
+        // prefectureフォルダに都道府県単位でHTMLを出力
+        var prefectureDirectoryPath = Path.Combine(directoryPath, "prefecture");
+        if (!Directory.Exists(prefectureDirectoryPath))
         {
-            Directory.CreateDirectory(liteDirectoryPath);
+            Directory.CreateDirectory(prefectureDirectoryPath);
         }
 
         foreach (var vt in 小選挙区出力内容Dic)
@@ -819,7 +819,7 @@ public static class Shuinsen2026Logic
             prefStrBldr.AppendLine("</div>");
 
             var prefFileName = $"{vt.都道府県名.ToString().ToLower()}.html";
-            File.WriteAllText(Path.Combine(liteDirectoryPath, prefFileName), prefStrBldr.ToString());
+            File.WriteAllText(Path.Combine(prefectureDirectoryPath, prefFileName), prefStrBldr.ToString());
         }
 
         Console.WriteLine($"Liteフォルダに都道府県別HTMLを出力しました。（{小選挙区出力内容Dic.Count}件）");
@@ -870,6 +870,34 @@ public static class Shuinsen2026Logic
         File.WriteAllText(Path.Combine(directoryPath, "proportional.html"), 比例区出力);
 
         Console.WriteLine("比例区HTMLを出力しました。");
+
+        // proportionalフォルダに比例ブロック単位でHTMLを出力
+        var proportionalDirectoryPath = Path.Combine(directoryPath, "proportional");
+        if (!Directory.Exists(proportionalDirectoryPath))
+        {
+            Directory.CreateDirectory(proportionalDirectoryPath);
+        }
+
+        foreach (var kv in 比例ブロック出力内容Dic)
+        {
+            var blockStrBldr = new StringBuilder();
+            blockStrBldr.AppendLine($"<div class='kuwari-section'>");
+            blockStrBldr.AppendLine($"<h3 id='hirei-{kv.Key.ToString().ToLower()}'>{kv.Key.GetDescription()}</h3>");
+            blockStrBldr.AppendLine("<div class='kohosya-info'><ol class='distList'>");
+
+            foreach (var resp in kv.Value)
+            {
+                blockStrBldr.AppendCandidateInfoHtml(resp);
+            }
+
+            blockStrBldr.AppendLine("</ol></div>");
+            blockStrBldr.AppendLine("</div>");
+
+            var blockFileName = $"{kv.Key.ToString().ToLower()}.html";
+            File.WriteAllText(Path.Combine(proportionalDirectoryPath, blockFileName), blockStrBldr.ToString());
+        }
+
+        Console.WriteLine($"proportionalフォルダに比例ブロック別HTMLを出力しました。（{比例ブロック出力内容Dic.Count}件）");
 
         Console.WriteLine($"小選挙区、比例区どちらにも該当しないデータ:{list.Count}件");
 
