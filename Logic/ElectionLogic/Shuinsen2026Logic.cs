@@ -544,7 +544,8 @@ public static class Shuinsen2026Logic
             "G. AI・機械学習に対する法的規制",
             "H. 国旗損壊罪による創作表現規制の懸念",
             "I. 表現の自由を不当に制限していると思うものは特にない",
-            "無回答"
+            "無回答",
+            "Q2理由"
         };
 
         // Q2選択肢のリスト（チェック用）
@@ -574,13 +575,16 @@ public static class Shuinsen2026Logic
             worksheet.Cell(row, 2).Value = item.Constituency;
             worksheet.Cell(row, 3).Value = item.PartyName;
 
+            var noAnswerCol = headers.Count - 1; // 「無回答」列
+            var reasonCol = headers.Count;       // 「Q2理由」列
+
             // 無回答チェック
             var isNoAnswer = item.Q2Reason == "無回答";
 
             if (isNoAnswer)
             {
-                // 無回答の場合は最後の列に○
-                worksheet.Cell(row, headers.Count).Value = "○";
+                // 無回答の場合は無回答列に○
+                worksheet.Cell(row, noAnswerCol).Value = "○";
             }
             else
             {
@@ -599,6 +603,9 @@ public static class Shuinsen2026Logic
                     }
                 }
             }
+
+            // Q2理由を出力
+            worksheet.Cell(row, reasonCol).Value = item.Q2Reason ?? string.Empty;
         }
 
         // 枠線設定
@@ -608,18 +615,19 @@ public static class Shuinsen2026Logic
         dataRange.Style.Border.OutsideBorderColor = XLColor.Black;
         dataRange.Style.Border.InsideBorderColor = XLColor.Gray;
 
-        // 選択肢列を中央揃え
-        var choiceRange = worksheet.Range(2, 4, data.Count + 1, headers.Count);
+        // 選択肢列を中央揃え（Q2理由列は除く）
+        var choiceRange = worksheet.Range(2, 4, data.Count + 1, headers.Count - 1);
         choiceRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 
         // 列幅調整
         worksheet.Column(1).Width = 15;  // 候補者名
         worksheet.Column(2).Width = 20;  // 選挙区
         worksheet.Column(3).Width = 15;  // 政党
-        for (var i = 4; i <= headers.Count; i++)
+        for (var i = 4; i <= headers.Count - 1; i++)
         {
             worksheet.Column(i).Width = 8;  // 選択肢列
         }
+        worksheet.Column(headers.Count).Width = 40;  // Q2理由
 
         // ヘッダー行を固定
         worksheet.SheetView.FreezeRows(1);
