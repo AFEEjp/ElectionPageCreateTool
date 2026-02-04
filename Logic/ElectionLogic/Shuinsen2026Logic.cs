@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using ClosedXML.Excel;
@@ -43,6 +47,52 @@ public static class Shuinsen2026Logic
         // 定義にない政党は「無所属」の直前（13と14の間 → 13を使うと無所属連合と被るので、無所属の前に入る値）
         return PartySortOrder["無所属"] - 1;
     }
+
+    /// <summary>
+    /// 政党名の正規化マッピング（統合先への変換）
+    /// </summary>
+    private static readonly Dictionary<string, string> PartyNameMapping = new()
+    {
+        { "減税日本", "減税日本・ゆうこく連合" },
+        { "自民党推薦", "無所属" },
+    };
+
+    /// <summary>
+    /// 政党名を正規化する（統合先があればそちらに変換）
+    /// </summary>
+    private static string NormalizePartyName(string partyName)
+    {
+        return PartyNameMapping.GetValueOrDefault(partyName, partyName);
+    }
+
+    /// <summary>
+    /// 政党別の候補者数（擁立数）
+    /// ※「減税日本」は「減税日本・ゆうこく連合」、「自民党推薦」は「無所属」に含まれる
+    /// </summary>
+    private static readonly Dictionary<string, int> PartyCandidateCount = new()
+    {
+        { "自由民主党", 337 },
+        { "中道改革連合", 236 },
+        { "日本維新の会", 89 },
+        { "国民民主党", 104 },
+        { "れいわ新選組", 31 },
+        { "日本共産党", 176 },
+        { "減税日本・ゆうこく連合", 18 },
+        { "参政党", 190 },
+        { "日本保守党（代表者：百田尚樹）", 20 },
+        { "世界平和党", 1 },
+        { "社会民主党", 15 },
+        { "チームみらい", 14 },
+        { "再生の道", 2 },
+        { "未来進歩党", 1 },
+        { "日本自由党", 1 },
+        { "無所属連合", 2 },
+        { "安楽死制度を考える会", 2 },
+        { "一番星", 1 },
+        { "核融合党", 1 },
+        { "日本大和党", 1 },
+        { "無所属", 41 },
+    };
 
     /// <summary>
     /// Q1選択肢とアルファベットの対応（アンケートフォームの順番）
@@ -219,7 +269,7 @@ public static class Shuinsen2026Logic
                 }
 
                 // IsDeleteフラグの確認
-                var isDelete = correction.TryGetProperty("IsDelete", out var isDeleteProp) 
+                var isDelete = correction.TryGetProperty("IsDelete", out var isDeleteProp)
                     && isDeleteProp.GetBoolean();
 
                 // 各データ行に対してマッチングを確認
@@ -585,6 +635,7 @@ public static class Shuinsen2026Logic
             workbookCustomizer: (workbook, data) =>
             {
                 AddQ2FilterSheet(workbook, data);
+                AddPartyResponseSheet(workbook, data);
                 AddQ1ChartDataSheet(workbook, data);
                 AddQ2ChartDataSheet(workbook, data);
             });
@@ -593,6 +644,94 @@ public static class Shuinsen2026Logic
         AddChartsToExcel(outputFilePath);
 
         Console.ReadKey();
+    }
+
+    /// <summary>
+    /// 政党別回答状況シートを追加
+    /// </summary>
+    private static void AddPartyResponseSheet(IXLWorkbook workbook, List<Shuinsen2026Respond> data)
+    {
+        var worksheet = workbook.Worksheets.Add("政党別回答状況");
+
+        // ヘッダー
+        var headers = new[] { "政党名", "候補者数", "回答数", "未回答数", "回答率" };
+        for (var i = 0; i < headers.Length; i++)
+        {
+            worksheet.Cell(1, i + 1).Value = headers[i];
+        }
+
+        // ヘッダースタイル
+        var headerRange = worksheet.Range(1, 1, 1, headers.Length);
+        headerRange.Style.Fill.BackgroundColor = XLColor.FromHtml("#4472C4");
+        headerRange.Style.Font.Bold = true;
+        headerRange.Style.Font.FontColor = XLColor.White;
+        headerRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+        // 政党別にグループ化（PartySortOrder順）
+        var partyGroups = data
+            .GroupBy(d => NormalizePartyName(d.PartyName))
+            .OrderBy(g => GetPartySortKey(g.Key))
+            .Select(g => new { PartyName = g.Key, ResponseCount = g.Count() })
+            .ToList();
+
+        var grandCandidateTotal = 0;
+        var grandResponseTotal = 0;
+
+        for (var rowIndex = 0; rowIndex < partyGroups.Count; rowIndex++)
+        {
+            var party = partyGroups[rowIndex];
+            var row = rowIndex + 2;
+            var candidateCount = PartyCandidateCount.GetValueOrDefault(party.PartyName, 0);
+
+            var noResponseCount = Math.Max(0, candidateCount - party.ResponseCount);
+
+            worksheet.Cell(row, 1).Value = party.PartyName;
+            worksheet.Cell(row, 2).Value = candidateCount;
+            worksheet.Cell(row, 3).Value = party.ResponseCount;
+            worksheet.Cell(row, 4).Value = noResponseCount;
+            worksheet.Cell(row, 5).Value = candidateCount == 0 ? 0 : (double)party.ResponseCount / candidateCount;
+            worksheet.Cell(row, 5).Style.NumberFormat.Format = "0.0%";
+
+            grandCandidateTotal += candidateCount;
+            grandResponseTotal += party.ResponseCount;
+        }
+
+        // 合計行
+        var totalRow = partyGroups.Count + 2;
+        var grandNoResponseTotal = Math.Max(0, grandCandidateTotal - grandResponseTotal);
+        worksheet.Cell(totalRow, 1).Value = "合計";
+        worksheet.Cell(totalRow, 1).Style.Font.Bold = true;
+        worksheet.Cell(totalRow, 2).Value = grandCandidateTotal;
+        worksheet.Cell(totalRow, 2).Style.Font.Bold = true;
+        worksheet.Cell(totalRow, 3).Value = grandResponseTotal;
+        worksheet.Cell(totalRow, 3).Style.Font.Bold = true;
+        worksheet.Cell(totalRow, 4).Value = grandNoResponseTotal;
+        worksheet.Cell(totalRow, 4).Style.Font.Bold = true;
+        worksheet.Cell(totalRow, 5).Value = grandCandidateTotal == 0 ? 0 : (double)grandResponseTotal / grandCandidateTotal;
+        worksheet.Cell(totalRow, 5).Style.NumberFormat.Format = "0.0%";
+        worksheet.Cell(totalRow, 5).Style.Font.Bold = true;
+
+        // 枠線
+        var dataRange = worksheet.Range(1, 1, totalRow, headers.Length);
+        dataRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        dataRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        dataRange.Style.Border.OutsideBorderColor = XLColor.Black;
+        dataRange.Style.Border.InsideBorderColor = XLColor.Gray;
+
+        // 数値列を中央揃え
+        var numRange = worksheet.Range(2, 2, totalRow, headers.Length);
+        numRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+        // 列幅
+        worksheet.Column(1).Width = 30;
+        worksheet.Column(2).Width = 12;
+        worksheet.Column(3).Width = 12;
+        worksheet.Column(4).Width = 12;
+        worksheet.Column(5).Width = 12;
+
+        worksheet.SheetView.FreezeRows(1);
+
+        Console.WriteLine("政党別回答状況シートを追加しました。");
     }
 
     /// <summary>
@@ -729,7 +868,7 @@ public static class Shuinsen2026Logic
 
         // 政党別にグループ化してQ1回答を集計
         var partyGroups = data
-            .GroupBy(d => d.PartyName)
+            .GroupBy(d => NormalizePartyName(d.PartyName))
             .OrderBy(g => GetPartySortKey(g.Key))
             .Select(g => new
             {
@@ -861,7 +1000,7 @@ public static class Shuinsen2026Logic
 
         // 政党別にグループ化してQ2回答を集計
         var partyGroups = data
-            .GroupBy(d => d.PartyName)
+            .GroupBy(d => NormalizePartyName(d.PartyName))
             .OrderBy(g => GetPartySortKey(g.Key))
             .Select(g =>
             {
@@ -1120,6 +1259,9 @@ public static class Shuinsen2026Logic
         // --- Q2政党別集計シートにチャートを追加 ---
         AddQ2ChartsToWorksheet(package);
 
+        // --- 政党別回答状況シートにチャートを追加 ---
+        AddPartyResponseChartsToWorksheet(package);
+
         package.Save();
     }
 
@@ -1203,6 +1345,70 @@ public static class Shuinsen2026Logic
         }
 
         Console.WriteLine("Q2政党別集計シートにチャートを追加しました。");
+    }
+
+    /// <summary>
+    /// 政党別回答状況シートに円グラフを追加する（EPPlusパッケージ内で呼び出し）
+    /// </summary>
+    private static void AddPartyResponseChartsToWorksheet(ExcelPackage package)
+    {
+        var ws = package.Workbook.Worksheets["政党別回答状況"];
+        if (ws == null)
+        {
+            Console.WriteLine("政党別回答状況シートが見つかりません。チャート追加をスキップします。");
+            return;
+        }
+
+        var lastRow = ws.Dimension.End.Row;    // 合計行含む最終行
+        var lastDataRow = lastRow - 1;         // 合計行の手前
+        var dataRowCount = lastDataRow - 1;    // ヘッダー除くデータ行数
+        if (dataRowCount <= 0)
+        {
+            Console.WriteLine("政党別回答状況データがないためチャート追加をスキップします。");
+            return;
+        }
+
+        // 円グラフの色: 回答=青, 未回答=グレー
+        var responseColor = System.Drawing.ColorTranslator.FromHtml("#4472C4");
+        var noResponseColor = System.Drawing.ColorTranslator.FromHtml("#A5A5A5");
+
+        // 政党別円グラフ（回答数C列 vs 未回答数D列）
+        var chartsPerRow = 4;
+        var chartWidth = 350;
+        var chartHeight = 300;
+        var baseRow = lastRow + 3;
+
+        for (var i = 0; i < dataRowCount; i++)
+        {
+            var gridRow = i / chartsPerRow;
+            var gridCol = i % chartsPerRow;
+            var dataRow = i + 2;
+            var partyName = ws.Cells[$"A{dataRow}"].Text;
+
+            var chartName = $"ResponsePie_{i}";
+            var pie = ws.Drawings.AddChart(chartName, eChartType.Pie);
+            pie.SetPosition(baseRow + gridRow * 18 - 1, 0, gridCol * 5, 0);
+            pie.SetSize(chartWidth, chartHeight);
+            pie.Title.Text = partyName;
+            pie.Title.Font.Size = 10;
+            pie.Legend.Position = eLegendPosition.Bottom;
+
+            // C列(回答数)とD列(未回答数)を値、ヘッダーをカテゴリ
+            var valRange = ws.Cells[$"C{dataRow}:D{dataRow}"];
+            var catRange = ws.Cells["C1:D1"];
+            var s = pie.Series.Add(valRange, catRange);
+            s.HeaderAddress = ws.Cells[$"A{dataRow}"];
+            if (pie is ExcelPieChart pieChart)
+            {
+                pieChart.DataLabel.ShowValue = true;
+                pieChart.DataLabel.ShowPercent = true;
+                pieChart.DataLabel.ShowCategory = false;
+                pieChart.Series[0].DataPoints.Add(0).Fill.Color = responseColor;
+                pieChart.Series[0].DataPoints.Add(1).Fill.Color = noResponseColor;
+            }
+        }
+
+        Console.WriteLine("政党別回答状況シートに円グラフを追加しました。");
     }
 
     /// <summary>
