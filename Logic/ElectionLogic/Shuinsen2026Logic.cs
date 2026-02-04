@@ -5,6 +5,8 @@ using ElectionPageCreateTool.Extensions;
 using ElectionPageCreateTool.Model;
 using ElectionPageCreateTool.Model.Shuinsen2026;
 using Microsoft.Extensions.Configuration;
+using OfficeOpenXml;
+using OfficeOpenXml.Drawing.Chart;
 
 namespace ElectionPageCreateTool.Logic.ElectionLogic;
 
@@ -547,7 +549,15 @@ public static class Shuinsen2026Logic
             outputFilePath: outputFilePath,
             excludeColumns: ["Result"],
             valueTransformer: ApplyNoAnswerRule,
-            workbookCustomizer: AddQ2FilterSheet);
+            workbookCustomizer: (workbook, data) =>
+            {
+                AddQ2FilterSheet(workbook, data);
+                AddQ1ChartDataSheet(workbook, data);
+                AddQ2ChartDataSheet(workbook, data);
+            });
+
+        // ClosedXMLで保存後、EPPlusでチャートを追加
+        AddChartsToExcel(outputFilePath);
 
         Console.ReadKey();
     }
@@ -666,6 +676,500 @@ public static class Shuinsen2026Logic
         worksheet.RangeUsed()?.SetAutoFilter();
 
         Console.WriteLine("Q2フィルターシートを追加しました。");
+    }
+
+    /// <summary>
+    /// Q1政党別集計データシートを追加
+    /// </summary>
+    private static void AddQ1ChartDataSheet(IXLWorkbook workbook, List<Shuinsen2026Respond> data)
+    {
+        var worksheet = workbook.Worksheets.Add("Q1政党別集計");
+
+        // Q1選択肢ラベル
+        var q1Labels = new[]
+        {
+            "A.法律で禁止するべき",
+            "B.法律で禁止するべきではない",
+            "C.どちらともいえない、答えない"
+        };
+        var q1Keys = Q1ChoiceOrder.Keys.ToArray(); // 選択肢の元テキスト
+
+        // 政党別にグループ化してQ1回答を集計
+        var partyGroups = data
+            .GroupBy(d => d.PartyName)
+            .OrderBy(g => GetPartySortKey(g.Key))
+            .Select(g => new
+            {
+                PartyName = g.Key,
+                Counts = q1Keys.Select(key => g.Count(d => d.Q1Answer.Trim() == key)).ToArray()
+            })
+            .ToList();
+
+        // 割合列のラベル
+        var q1PctLabels = new[]
+        {
+            "A.割合(%)",
+            "B.割合(%)",
+            "C.割合(%)"
+        };
+        var totalColCount = 1 + q1Labels.Length + q1PctLabels.Length; // 政党名 + 数値3列 + 割合3列
+
+        // ヘッダー
+        worksheet.Cell(1, 1).Value = "政党名";
+        for (var i = 0; i < q1Labels.Length; i++)
+        {
+            worksheet.Cell(1, i + 2).Value = q1Labels[i];
+        }
+        for (var i = 0; i < q1PctLabels.Length; i++)
+        {
+            worksheet.Cell(1, q1Labels.Length + 2 + i).Value = q1PctLabels[i];
+        }
+
+        // ヘッダースタイル
+        var headerRange = worksheet.Range(1, 1, 1, totalColCount);
+        headerRange.Style.Fill.BackgroundColor = XLColor.FromHtml("#4472C4");
+        headerRange.Style.Font.Bold = true;
+        headerRange.Style.Font.FontColor = XLColor.White;
+        headerRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        headerRange.Style.Alignment.WrapText = true;
+
+        // データ行
+        for (var rowIndex = 0; rowIndex < partyGroups.Count; rowIndex++)
+        {
+            var party = partyGroups[rowIndex];
+            var row = rowIndex + 2;
+            worksheet.Cell(row, 1).Value = party.PartyName;
+            for (var c = 0; c < party.Counts.Length; c++)
+            {
+                worksheet.Cell(row, c + 2).Value = party.Counts[c];
+            }
+            // 割合列: 各回答数 / (B+C+D) の行合計
+            var sumColLetters = string.Join("+", Enumerable.Range(0, q1Labels.Length).Select(c => $"{(char)('B' + c)}{row}"));
+            for (var c = 0; c < q1PctLabels.Length; c++)
+            {
+                var valCol = (char)('B' + c);
+                var pctCol = q1Labels.Length + 2 + c;
+                worksheet.Cell(row, pctCol).FormulaA1 = $"IF(({sumColLetters})=0,0,{valCol}{row}/({sumColLetters}))";
+                worksheet.Cell(row, pctCol).Style.NumberFormat.Format = "0.0%";
+            }
+        }
+
+        // 合計行を追加（円グラフ用）
+        var totalRow = partyGroups.Count + 2;
+        worksheet.Cell(totalRow, 1).Value = "合計";
+        worksheet.Cell(totalRow, 1).Style.Font.Bold = true;
+        for (var c = 0; c < q1Labels.Length; c++)
+        {
+            var colLetter = (char)('B' + c);
+            worksheet.Cell(totalRow, c + 2).FormulaA1 = $"SUM({colLetter}2:{colLetter}{partyGroups.Count + 1})";
+            worksheet.Cell(totalRow, c + 2).Style.Font.Bold = true;
+        }
+        // 合計行の割合
+        var totalSumLetters = string.Join("+", Enumerable.Range(0, q1Labels.Length).Select(c => $"{(char)('B' + c)}{totalRow}"));
+        for (var c = 0; c < q1PctLabels.Length; c++)
+        {
+            var valCol = (char)('B' + c);
+            var pctCol = q1Labels.Length + 2 + c;
+            worksheet.Cell(totalRow, pctCol).FormulaA1 = $"IF(({totalSumLetters})=0,0,{valCol}{totalRow}/({totalSumLetters}))";
+            worksheet.Cell(totalRow, pctCol).Style.NumberFormat.Format = "0.0%";
+            worksheet.Cell(totalRow, pctCol).Style.Font.Bold = true;
+        }
+
+        // 枠線
+        var dataRange = worksheet.Range(1, 1, totalRow, totalColCount);
+        dataRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        dataRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        dataRange.Style.Border.OutsideBorderColor = XLColor.Black;
+        dataRange.Style.Border.InsideBorderColor = XLColor.Gray;
+
+        // 数値列・割合列を中央揃え
+        var numRange = worksheet.Range(2, 2, totalRow, totalColCount);
+        numRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+        // 列幅
+        worksheet.Column(1).Width = 30; // 政党名
+        for (var i = 2; i <= q1Labels.Length + 1; i++)
+        {
+            worksheet.Column(i).Width = 20;
+        }
+        for (var i = q1Labels.Length + 2; i <= totalColCount; i++)
+        {
+            worksheet.Column(i).Width = 12; // 割合列
+        }
+
+        worksheet.SheetView.FreezeRows(1);
+
+        Console.WriteLine("Q1政党別集計シートを追加しました。");
+    }
+
+    /// <summary>
+    /// Q2政党別集計データシートを追加
+    /// </summary>
+    private static void AddQ2ChartDataSheet(IXLWorkbook workbook, List<Shuinsen2026Respond> data)
+    {
+        var worksheet = workbook.Worksheets.Add("Q2政党別集計");
+
+        // Q2選択肢ラベル（A〜I + 無回答）
+        var q2Labels = new[]
+        {
+            "A.刑法のわいせつ物頒布等罪による規制",
+            "B.AV新法による規制",
+            "C.クレジットカード決済の制約",
+            "D.ジェンダー平等論や多様性配慮に基づく表現制限",
+            "E.新サイバー犯罪条約による創作物への規制",
+            "F.「不適切」を理由とする広告の法的規制",
+            "G.AI・機械学習に対する法的規制",
+            "H.国旗損壊罪による創作表現規制の懸念",
+            "I.特にない",
+            "無回答"
+        };
+        var q2Keys = Q2ChoiceOrder.Keys.ToArray(); // 選択肢の元テキスト（9個）
+        var choiceCount = q2Labels.Length; // 10（9選択肢+無回答）
+
+        // 政党別にグループ化してQ2回答を集計
+        var partyGroups = data
+            .GroupBy(d => d.PartyName)
+            .OrderBy(g => GetPartySortKey(g.Key))
+            .Select(g =>
+            {
+                var counts = new int[choiceCount];
+                foreach (var d in g)
+                {
+                    var isNoAnswer = d.Q2Reason == "無回答";
+                    if (isNoAnswer)
+                    {
+                        counts[choiceCount - 1]++; // 無回答列
+                    }
+                    else
+                    {
+                        var selectedChoices = d.Q2Answer
+                            .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                            .Select(a => a.Trim())
+                            .ToHashSet();
+                        for (var i = 0; i < q2Keys.Length; i++)
+                        {
+                            if (selectedChoices.Contains(q2Keys[i]))
+                            {
+                                counts[i]++;
+                            }
+                        }
+                    }
+                }
+                return new { PartyName = g.Key, Counts = counts, Total = g.Count() };
+            })
+            .ToList();
+
+        // 割合列のラベル
+        var q2PctLabels = new[]
+        {
+            "A.割合(%)", "B.割合(%)", "C.割合(%)", "D.割合(%)", "E.割合(%)",
+            "F.割合(%)", "G.割合(%)", "H.割合(%)", "I.割合(%)", "無回答割合(%)"
+        };
+        var totalColCount = 1 + choiceCount + choiceCount; // 政党名 + 数値10列 + 割合10列 = 21
+
+        // ヘッダー
+        worksheet.Cell(1, 1).Value = "政党名";
+        for (var i = 0; i < choiceCount; i++)
+        {
+            worksheet.Cell(1, i + 2).Value = q2Labels[i];
+        }
+        for (var i = 0; i < choiceCount; i++)
+        {
+            worksheet.Cell(1, choiceCount + 2 + i).Value = q2PctLabels[i];
+        }
+
+        // ヘッダースタイル
+        var headerRange = worksheet.Range(1, 1, 1, totalColCount);
+        headerRange.Style.Fill.BackgroundColor = XLColor.FromHtml("#4472C4");
+        headerRange.Style.Font.Bold = true;
+        headerRange.Style.Font.FontColor = XLColor.White;
+        headerRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        headerRange.Style.Alignment.WrapText = true;
+
+        // データ行
+        for (var rowIndex = 0; rowIndex < partyGroups.Count; rowIndex++)
+        {
+            var party = partyGroups[rowIndex];
+            var row = rowIndex + 2;
+            worksheet.Cell(row, 1).Value = party.PartyName;
+            for (var c = 0; c < choiceCount; c++)
+            {
+                worksheet.Cell(row, c + 2).Value = party.Counts[c];
+            }
+            // 割合列: 各選択肢の人数 / その政党の回答者総数
+            for (var c = 0; c < choiceCount; c++)
+            {
+                var pctCol = choiceCount + 2 + c;
+                var total = party.Total;
+                worksheet.Cell(row, pctCol).Value = total == 0 ? 0 : (double)party.Counts[c] / total;
+                worksheet.Cell(row, pctCol).Style.NumberFormat.Format = "0.0%";
+            }
+        }
+
+        // 合計行
+        var totalRow = partyGroups.Count + 2;
+        worksheet.Cell(totalRow, 1).Value = "合計";
+        worksheet.Cell(totalRow, 1).Style.Font.Bold = true;
+        var grandTotal = data.Count;
+        var grandCounts = new int[choiceCount];
+        foreach (var party in partyGroups)
+        {
+            for (var c = 0; c < choiceCount; c++)
+            {
+                grandCounts[c] += party.Counts[c];
+            }
+        }
+        for (var c = 0; c < choiceCount; c++)
+        {
+            worksheet.Cell(totalRow, c + 2).Value = grandCounts[c];
+            worksheet.Cell(totalRow, c + 2).Style.Font.Bold = true;
+
+            var pctCol = choiceCount + 2 + c;
+            worksheet.Cell(totalRow, pctCol).Value = grandTotal == 0 ? 0 : (double)grandCounts[c] / grandTotal;
+            worksheet.Cell(totalRow, pctCol).Style.NumberFormat.Format = "0.0%";
+            worksheet.Cell(totalRow, pctCol).Style.Font.Bold = true;
+        }
+
+        // 枠線
+        var dataRange = worksheet.Range(1, 1, totalRow, totalColCount);
+        dataRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        dataRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        dataRange.Style.Border.OutsideBorderColor = XLColor.Black;
+        dataRange.Style.Border.InsideBorderColor = XLColor.Gray;
+
+        // 数値列・割合列を中央揃え
+        var numRange = worksheet.Range(2, 2, totalRow, totalColCount);
+        numRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+        // 列幅
+        worksheet.Column(1).Width = 30; // 政党名
+        for (var i = 2; i <= choiceCount + 1; i++)
+        {
+            worksheet.Column(i).Width = 12; // 数値列
+        }
+        for (var i = choiceCount + 2; i <= totalColCount; i++)
+        {
+            worksheet.Column(i).Width = 12; // 割合列
+        }
+
+        worksheet.SheetView.FreezeRows(1);
+
+        Console.WriteLine("Q2政党別集計シートを追加しました。");
+    }
+
+    /// <summary>
+    /// 保存済みExcelファイルにEPPlusでチャートを追加する
+    /// </summary>
+    public static void AddChartsToExcel(string filePath)
+    {
+        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+
+        using var package = new ExcelPackage(new FileInfo(filePath));
+        var ws = package.Workbook.Worksheets["Q1政党別集計"];
+        if (ws == null)
+        {
+            Console.WriteLine("Q1政党別集計シートが見つかりません。チャート追加をスキップします。");
+            return;
+        }
+
+        // データ範囲を特定（ヘッダー行=1, データ行=2～N, 合計行=N+1）
+        var lastRow = ws.Dimension.End.Row;        // 合計行含む最終行
+        var lastDataRow = lastRow - 1;             // 合計行の手前
+        var dataRowCount = lastDataRow - 1;        // ヘッダー除くデータ行数
+        if (dataRowCount <= 0)
+        {
+            Console.WriteLine("データがないためチャート追加をスキップします。");
+            return;
+        }
+
+        var catAddress = $"A2:A{lastDataRow}";     // 政党名（カテゴリ軸）
+        var seriesColors = new[] { "#E04040", "#4472C4", "#A5A5A5" };
+        var seriesCols = new[] { "B", "C", "D" };
+
+        // --- チャート1: 集合縦棒グラフ ---
+        var chartRow = lastRow + 3;
+        var clustered = ws.Drawings.AddChart("ClusteredBar", eChartType.ColumnClustered);
+        clustered.SetPosition(chartRow - 1, 0, 0, 0);
+        clustered.SetSize(700, 400);
+        clustered.Title.Text = "Q1 政党別回答（集合縦棒）";
+        clustered.Legend.Position = eLegendPosition.Bottom;
+        for (var i = 0; i < 3; i++)
+        {
+            var valRange = ws.Cells[$"{seriesCols[i]}2:{seriesCols[i]}{lastDataRow}"];
+            var catRange = ws.Cells[catAddress];
+            var s = clustered.Series.Add(valRange, catRange);
+            s.HeaderAddress = ws.Cells[$"{seriesCols[i]}1"];
+            s.Fill.Color = System.Drawing.ColorTranslator.FromHtml(seriesColors[i]);
+        }
+
+        // --- チャート2: 積み上げ棒グラフ ---
+        var stacked = ws.Drawings.AddChart("StackedBar", eChartType.BarStacked100);
+        stacked.SetPosition(chartRow - 1, 0, 10, 0);
+        stacked.SetSize(700, 400);
+        stacked.Title.Text = "Q1 政党別回答（積み上げ）";
+        stacked.Legend.Position = eLegendPosition.Bottom;
+        for (var i = 0; i < 3; i++)
+        {
+            var valRange = ws.Cells[$"{seriesCols[i]}2:{seriesCols[i]}{lastDataRow}"];
+            var catRange = ws.Cells[catAddress];
+            var s = stacked.Series.Add(valRange, catRange);
+            s.HeaderAddress = ws.Cells[$"{seriesCols[i]}1"];
+            s.Fill.Color = System.Drawing.ColorTranslator.FromHtml(seriesColors[i]);
+        }
+        if (stacked is ExcelBarChart stackedBarChart)
+        {
+            stackedBarChart.DataLabel.ShowValue = true;
+            stackedBarChart.DataLabel.ShowPercent = false;
+            stackedBarChart.DataLabel.ShowCategory = false;
+            stackedBarChart.DataLabel.ShowSeriesName = false;
+        }
+
+        // --- チャート3: 全体円グラフ ---
+        var pieRow = chartRow + 22;
+        var overallPie = ws.Drawings.AddChart("OverallPie", eChartType.Pie);
+        overallPie.SetPosition(pieRow - 1, 0, 0, 0);
+        overallPie.SetSize(700, 400);
+        overallPie.Title.Text = "Q1 全体回答割合";
+        overallPie.Legend.Position = eLegendPosition.Bottom;
+        var totalValRange = ws.Cells[$"B{lastRow}:D{lastRow}"];   // 合計行
+        var totalCatRange = ws.Cells["B1:D1"];                     // ヘッダー（選択肢名）
+        var pieSeries = overallPie.Series.Add(totalValRange, totalCatRange);
+        pieSeries.HeaderAddress = ws.Cells[$"A{lastRow}"];
+        if (overallPie is ExcelPieChart overallPieChart)
+        {
+            overallPieChart.DataLabel.ShowValue = true;
+            overallPieChart.DataLabel.ShowPercent = true;
+            overallPieChart.DataLabel.ShowCategory = false;
+            for (var i = 0; i < 3; i++)
+            {
+                overallPieChart.Series[0].DataPoints.Add(i).Fill.Color = System.Drawing.ColorTranslator.FromHtml(seriesColors[i]);
+            }
+        }
+
+        // --- チャート4: 政党別円グラフ群 ---
+        var chartsPerRow = 4;
+        var chartWidth = 350;
+        var chartHeight = 300;
+
+        for (var i = 0; i < dataRowCount; i++)
+        {
+            var gridRow = i / chartsPerRow;
+            var gridCol = i % chartsPerRow;
+            var dataRow = i + 2;
+            var partyName = ws.Cells[$"A{dataRow}"].Text;
+
+            var chartName = $"PartyPie_{i}";
+            var partyPie = ws.Drawings.AddChart(chartName, eChartType.Pie);
+            partyPie.SetPosition(pieRow + 22 + gridRow * 18 - 1, 0, 10 + gridCol * 5, 0);
+            partyPie.SetSize(chartWidth, chartHeight);
+            partyPie.Title.Text = partyName;
+            partyPie.Title.Font.Size = 10;
+            partyPie.Legend.Position = eLegendPosition.Bottom;
+
+            var partyValRange = ws.Cells[$"B{dataRow}:D{dataRow}"];
+            var partyCatRange = ws.Cells["B1:D1"];
+            var ps = partyPie.Series.Add(partyValRange, partyCatRange);
+            ps.HeaderAddress = ws.Cells[$"A{dataRow}"];
+            if (partyPie is ExcelPieChart partyPieChart)
+            {
+                partyPieChart.DataLabel.ShowValue = true;
+                partyPieChart.DataLabel.ShowPercent = true;
+                partyPieChart.DataLabel.ShowCategory = false;
+                for (var j = 0; j < 3; j++)
+                {
+                    partyPieChart.Series[0].DataPoints.Add(j).Fill.Color = System.Drawing.ColorTranslator.FromHtml(seriesColors[j]);
+                }
+            }
+        }
+
+        Console.WriteLine("Q1政党別集計シートにチャートを追加しました。");
+
+        // --- Q2政党別集計シートにチャートを追加 ---
+        AddQ2ChartsToWorksheet(package);
+
+        package.Save();
+    }
+
+    /// <summary>
+    /// Q2政党別集計シートにチャートを追加する（EPPlusパッケージ内で呼び出し）
+    /// </summary>
+    private static void AddQ2ChartsToWorksheet(ExcelPackage package)
+    {
+        var ws = package.Workbook.Worksheets["Q2政党別集計"];
+        if (ws == null)
+        {
+            Console.WriteLine("Q2政党別集計シートが見つかりません。チャート追加をスキップします。");
+            return;
+        }
+
+        var lastRow = ws.Dimension.End.Row;        // 合計行含む最終行
+        var lastDataRow = lastRow - 1;             // 合計行の手前
+        var dataRowCount = lastDataRow - 1;        // ヘッダー除くデータ行数
+        if (dataRowCount <= 0)
+        {
+            Console.WriteLine("Q2データがないためチャート追加をスキップします。");
+            return;
+        }
+
+        // Q2は10列（B〜K: 9選択肢+無回答）
+        var seriesCols = new[] { "B", "C", "D", "E", "F", "G", "H", "I", "J", "K" };
+        var catAddress = $"A2:A{lastDataRow}"; // 政党名（カテゴリ軸）
+
+        // --- チャート1: 全体集合横棒グラフ（合計行の選択肢別人数） ---
+        var chartRow = lastRow + 3;
+        var overallBar = ws.Drawings.AddChart("Q2OverallBar", eChartType.BarClustered);
+        overallBar.SetPosition(chartRow - 1, 0, 0, 0);
+        overallBar.SetSize(900, 500);
+        overallBar.Title.Text = "Q2 全体回答（選択肢別人数）";
+        overallBar.Legend.Position = eLegendPosition.Bottom;
+
+        // 合計行のB〜Kをデータ、ヘッダー行のB1〜K1をカテゴリとして1系列の横棒グラフ
+        var totalValRange = ws.Cells[$"B{lastRow}:K{lastRow}"];
+        var totalCatRange = ws.Cells["B1:K1"];
+        var overallSeries = overallBar.Series.Add(totalValRange, totalCatRange);
+        overallSeries.HeaderAddress = ws.Cells[$"A{lastRow}"];
+        if (overallBar is ExcelBarChart overallBarChart)
+        {
+            overallBarChart.DataLabel.ShowValue = true;
+            overallBarChart.DataLabel.ShowCategory = false;
+            overallBarChart.DataLabel.ShowSeriesName = false;
+        }
+
+        // --- チャート2: 政党別の個別横棒グラフ ---
+        var chartsPerRow = 2;
+        var chartWidth = 700;
+        var chartHeight = 400;
+        var baseRow = chartRow + 28;
+
+        for (var i = 0; i < dataRowCount; i++)
+        {
+            var gridRow = i / chartsPerRow;
+            var gridCol = i % chartsPerRow;
+            var dataRow = i + 2;
+            var partyName = ws.Cells[$"A{dataRow}"].Text;
+
+            var chartName = $"Q2PartyBar_{i}";
+            var partyBar = ws.Drawings.AddChart(chartName, eChartType.BarClustered);
+            partyBar.SetPosition(baseRow + gridRow * 22 - 1, 0, gridCol * 10, 0);
+            partyBar.SetSize(chartWidth, chartHeight);
+            partyBar.Title.Text = $"Q2 {partyName}";
+            partyBar.Title.Font.Size = 11;
+            partyBar.Legend.Position = eLegendPosition.Bottom;
+
+            // 該当政党行のB〜Kをデータ、ヘッダー行をカテゴリ
+            var partyValRange = ws.Cells[$"B{dataRow}:K{dataRow}"];
+            var partyCatRange = ws.Cells["B1:K1"];
+            var s = partyBar.Series.Add(partyValRange, partyCatRange);
+            s.HeaderAddress = ws.Cells[$"A{dataRow}"];
+            if (partyBar is ExcelBarChart partyBarChart)
+            {
+                partyBarChart.DataLabel.ShowValue = true;
+                partyBarChart.DataLabel.ShowCategory = false;
+                partyBarChart.DataLabel.ShowSeriesName = false;
+            }
+        }
+
+        Console.WriteLine("Q2政党別集計シートにチャートを追加しました。");
     }
 
     /// <summary>
