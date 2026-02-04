@@ -13,6 +13,36 @@ public static class Shuinsen2026Logic
     public static readonly DateTime NoticeDate = new DateTime(2026, 1, 27);
 
     /// <summary>
+    /// 比例ブロック出力時の政党ソート順
+    /// </summary>
+    private static readonly Dictionary<string, int> PartySortOrder = new()
+    {
+        { "自由民主党", 0 },
+        { "日本維新の会", 1 },
+        { "中道改革連合", 2 },
+        { "国民民主党", 3 },
+        { "チームみらい", 4 },
+        { "参政党", 5 },
+        { "日本共産党", 6 },
+        { "れいわ新選組", 7 },
+        { "日本保守党（代表者：百田尚樹）", 8 },
+        { "社会民主党", 9 },
+        { "減税日本", 10 },
+        { "減税日本・ゆうこく連合", 11 },
+        { "再生の道", 12 },
+        { "無所属連合", 13 },
+        { "無所属", 14 },
+    };
+
+    private static int GetPartySortKey(string partyName)
+    {
+        if (PartySortOrder.TryGetValue(partyName, out var order))
+            return order;
+        // 定義にない政党は「無所属」の直前（13と14の間 → 13を使うと無所属連合と被るので、無所属の前に入る値）
+        return PartySortOrder["無所属"] - 1;
+    }
+
+    /// <summary>
     /// Q1選択肢とアルファベットの対応（アンケートフォームの順番）
     /// </summary>
     private static readonly Dictionary<string, string> Q1ChoiceOrder = new()
@@ -854,7 +884,7 @@ public static class Shuinsen2026Logic
                 list.Remove(respond);
             }
 
-            比例ブロック出力内容Dic.Add(blk, respondList);
+            比例ブロック出力内容Dic.Add(blk, respondList.OrderBy(r => GetPartySortKey(r.PartyName)).ThenBy(r => r.NameFurigana).ToList());
         }
 
         // 比例ブロックの出力
