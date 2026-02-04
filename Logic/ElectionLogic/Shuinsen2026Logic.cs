@@ -208,14 +208,19 @@ public static class Shuinsen2026Logic
             }
 
             var appliedCount = 0;
+            var deletedCount = 0;
+            var rowsToDelete = new List<Dictionary<string, string>>();
 
             foreach (var correction in corrections.EnumerateArray())
             {
-                if (!correction.TryGetProperty("Match", out var matchConditions) ||
-                    !correction.TryGetProperty("Replace", out var replaceValues))
+                if (!correction.TryGetProperty("Match", out var matchConditions))
                 {
                     continue;
                 }
+
+                // IsDeleteフラグの確認
+                var isDelete = correction.TryGetProperty("IsDelete", out var isDeleteProp) 
+                    && isDeleteProp.GetBoolean();
 
                 // 各データ行に対してマッチングを確認
                 foreach (var row in data)
@@ -236,44 +241,72 @@ public static class Shuinsen2026Logic
                         }
                     }
 
-                    // マッチした場合、Replace値を適用
+                    // マッチした場合の処理
                     if (isMatch)
                     {
                         var name = row.GetValueOrDefault(ExcelHeader_Name, "");
-                        var replacedFields = new List<string>();
 
-                        foreach (var replace in replaceValues.EnumerateObject())
+                        if (isDelete)
                         {
-                            var key = replace.Name;
-                            var newValue = replace.Value.GetString() ?? string.Empty;
-
-                            if (row.ContainsKey(key))
+                            // 削除対象としてマーク
+                            if (!rowsToDelete.Contains(row))
                             {
-                                var oldValue = row[key];
-                                if (oldValue != newValue)
-                                {
-                                    row[key] = newValue;
-                                    replacedFields.Add($"{key}: 「{oldValue}」→「{newValue}」");
-                                }
+                                rowsToDelete.Add(row);
+                                deletedCount++;
+                                Console.WriteLine($"  削除対象: {name}");
                             }
                         }
-
-                        if (replacedFields.Count > 0)
+                        else
                         {
-                            appliedCount++;
-                            Console.WriteLine($"  修正適用: {name}");
-                            foreach (var field in replacedFields)
+                            // Replace値を適用
+                            if (correction.TryGetProperty("Replace", out var replaceValues))
                             {
-                                Console.WriteLine($"    {field}");
+                                var replacedFields = new List<string>();
+
+                                foreach (var replace in replaceValues.EnumerateObject())
+                                {
+                                    var key = replace.Name;
+                                    var newValue = replace.Value.GetString() ?? string.Empty;
+
+                                    if (row.ContainsKey(key))
+                                    {
+                                        var oldValue = row[key];
+                                        if (oldValue != newValue)
+                                        {
+                                            row[key] = newValue;
+                                            replacedFields.Add($"{key}: 「{oldValue}」→「{newValue}」");
+                                        }
+                                    }
+                                }
+
+                                if (replacedFields.Count > 0)
+                                {
+                                    appliedCount++;
+                                    Console.WriteLine($"  修正適用: {name}");
+                                    foreach (var field in replacedFields)
+                                    {
+                                        Console.WriteLine($"    {field}");
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
 
+            // 削除対象を実際に削除
+            foreach (var rowToDelete in rowsToDelete)
+            {
+                data.Remove(rowToDelete);
+            }
+
             if (appliedCount > 0)
             {
                 Console.WriteLine($"修正ルール適用: {appliedCount} 件");
+            }
+            if (deletedCount > 0)
+            {
+                Console.WriteLine($"データ削除: {deletedCount} 件");
             }
         }
         catch (JsonException ex)
