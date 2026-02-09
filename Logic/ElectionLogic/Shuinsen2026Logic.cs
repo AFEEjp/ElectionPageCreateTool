@@ -623,6 +623,11 @@ public static class Shuinsen2026Logic
         var dbLogic = new DatabaseOperationLogic();
         var tableName = nameof(Shuinsen2026Respond);
 
+        // 当落カラムの出力判定：全レコードに当落が設定されている場合のみ出力
+        var allData = dbLogic.GetAllData<Shuinsen2026Respond>(tableName);
+        var includeResult = allData.Count > 0 && allData.Any(d => !string.IsNullOrEmpty(d.Result));
+        var excludeColumns = includeResult ? Array.Empty<string>() : new[] { "Result" };
+
         // ファイル名: テーブル名_yyyyMMddHHmmss.xlsx
         var fileName = $"{tableName}_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
         var outputFilePath = Path.Combine(directoryPath, fileName);
@@ -630,7 +635,7 @@ public static class Shuinsen2026Logic
         dbLogic.ExportToExcel<Shuinsen2026Respond>(
             tableName: tableName,
             outputFilePath: outputFilePath,
-            excludeColumns: ["Result"],
+            excludeColumns: excludeColumns,
             valueTransformer: ApplyNoAnswerRule,
             workbookCustomizer: (workbook, data) =>
             {
