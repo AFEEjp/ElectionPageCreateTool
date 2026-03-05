@@ -8,40 +8,46 @@ namespace ElectionPageCreateTool.Extensions
         public static string GetDescription(this Enum value)
         {
             var field = value.GetType().GetField(value.ToString());
-            var attribute =
-                (DescriptionAttribute)Attribute.GetCustomAttribute(field, typeof(DescriptionAttribute));
-            return attribute != null ? attribute.Description : value.ToString();
-        }
+            if (field == null) return value.ToString();
 
+            var attribute = Attribute.GetCustomAttribute(field, typeof(DescriptionAttribute)) as DescriptionAttribute;
+            return attribute?.Description ?? value.ToString();
+        }
 
         public static int GetShugiinKuwariCount(this Enum value)
         {
             var field = value.GetType().GetField(value.ToString());
-            var attribute = (ShugiinKuwariAttribute)Attribute.GetCustomAttribute(field, typeof(ShugiinKuwariAttribute));
+            if (field == null) return 0;
+
+            var attribute = Attribute.GetCustomAttribute(field, typeof(ShugiinKuwariAttribute)) as ShugiinKuwariAttribute;
             return attribute?.Kuwari ?? 0;
         }
-
 
         public static string GetShugiinKuwariStr(this Enum value)
         {
             var field = value.GetType().GetField(value.ToString());
-            var attribute = (ShugiinKuwariAttribute)Attribute.GetCustomAttribute(field, typeof(ShugiinKuwariAttribute));
-            return attribute?.Name ?? "";
-        }
+            if (field == null) return string.Empty;
 
+            var attribute = Attribute.GetCustomAttribute(field, typeof(ShugiinKuwariAttribute)) as ShugiinKuwariAttribute;
+            return attribute?.Name ?? string.Empty;
+        }
 
         public static string GetAbbreviation(this Enum value)
         {
             var field = value.GetType().GetField(value.ToString());
-            var attribute = (AbbreviationAttribute)Attribute.GetCustomAttribute(field, typeof(AbbreviationAttribute));
-            return attribute != null ? attribute.Name : value.ToString();
+            if (field == null) return value.ToString();
+
+            var attribute = Attribute.GetCustomAttribute(field, typeof(AbbreviationAttribute)) as AbbreviationAttribute;
+            return attribute?.Name ?? value.ToString();
         }
 
         public static string GetAlphabetName(this Enum value)
         {
             var field = value.GetType().GetField(value.ToString());
-            var attribute = (AlphabetNameAttribute)Attribute.GetCustomAttribute(field, typeof(AlphabetNameAttribute));
-            return attribute != null ? attribute.Name : value.ToString();
+            if (field == null) return value.ToString();
+
+            var attribute = Attribute.GetCustomAttribute(field, typeof(AlphabetNameAttribute)) as AlphabetNameAttribute;
+            return attribute?.Name ?? value.ToString();
         }
     }
 }

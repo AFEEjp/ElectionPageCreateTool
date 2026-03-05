@@ -19,26 +19,34 @@ namespace ElectionPageCreateTool.Logic
 
                 // 1シート目を取得
                 var worksheet = workbook.Worksheet(1);
-                var headers = GetHeaders(worksheet);
+                var headerColumns = GetHeaderColumns(worksheet);
 
                 // データを格納するリスト
                 var dataList = new List<Dictionary<string, string>>();
 
                 // 2行目から最終行までループ
-                var rowIndex = 2;
-                while (!string.IsNullOrEmpty(worksheet.Cell(rowIndex, 1).Value.ToString()))
+                var lastRowUsed = worksheet.LastRowUsed()?.RowNumber() ?? 1;
+                for (var rowIndex = 2; rowIndex <= lastRowUsed; rowIndex++)
                 {
+                    // 有効なデータ行かどうかを判定（全ての対象列が空の場合はスキップ）
+                    var hasData = headerColumns.Any(hc =>
+                        !string.IsNullOrEmpty(worksheet.Cell(rowIndex, hc.ColumnIndex).Value.ToString()));
+
+                    if (!hasData)
+                    {
+                        continue;
+                    }
+
                     var dataRow = new Dictionary<string, string>();
 
-                    // 各列のデータを取得
-                    for (var colIndex = 1; colIndex <= headers.Count; colIndex++)
+                    // 各列のデータを取得（ヘッダーが空白でない列のみ）
+                    foreach (var (headerName, colIndex) in headerColumns)
                     {
                         var cellValue = worksheet.Cell(rowIndex, colIndex).Value.ToString();
-                        dataRow.Add(headers[colIndex - 1], cellValue);
+                        dataRow.Add(headerName, cellValue ?? string.Empty);
                     }
 
                     dataList.Add(dataRow);
-                    rowIndex++;
                 }
 
                 return dataList;
@@ -62,7 +70,7 @@ namespace ElectionPageCreateTool.Logic
             // 出力パスが指定されていない場合、元のファイル名に "_merged" を追加
             if (string.IsNullOrEmpty(outputPath))
             {
-                var directory = Path.GetDirectoryName(mainFilePath);
+                var directory = Path.GetDirectoryName(mainFilePath) ?? string.Empty;
                 var fileName = Path.GetFileNameWithoutExtension(mainFilePath) + "_merged" + Path.GetExtension(mainFilePath);
                 outputPath = Path.Combine(directory, fileName);
             }
@@ -154,22 +162,36 @@ namespace ElectionPageCreateTool.Logic
 
 
         /// <summary>
-        /// ヘッダー行を取得するヘルパーメソッド
+        /// ヘッダー行を取得するヘルパーメソッド（ヘッダー名とカラムインデックスのペア）
+        /// 1行目をヘッダーとして扱い、空白のセルは対象外とする
         /// </summary>
-        /// <param name="worksheet"></param>
-        /// <returns></returns>
-        private List<string> GetHeaders(IXLWorksheet worksheet)
+        private List<(string HeaderName, int ColumnIndex)> GetHeaderColumns(IXLWorksheet worksheet)
         {
-            var headers = new List<string>();
-            var colIndex = 1;
+            var headerColumns = new List<(string HeaderName, int ColumnIndex)>();
 
-            while (!string.IsNullOrEmpty(worksheet.Cell(1, colIndex).Value.ToString()))
+            // 1行目の使用範囲の最終列を取得
+            var lastColumnUsed = worksheet.LastColumnUsed()?.ColumnNumber() ?? 1;
+
+            for (var colIndex = 1; colIndex <= lastColumnUsed; colIndex++)
             {
-                headers.Add(worksheet.Cell(1, colIndex).Value.ToString());
-                colIndex++;
+                var headerValue = worksheet.Cell(1, colIndex).Value.ToString();
+
+                // 空白のヘッダーはスキップ
+                if (!string.IsNullOrEmpty(headerValue))
+                {
+                    headerColumns.Add((headerValue, colIndex));
+                }
             }
 
-            return headers;
+            return headerColumns;
+        }
+
+        /// <summary>
+        /// ヘッダー行を取得するヘルパーメソッド（後方互換用）
+        /// </summary>
+        private List<string> GetHeaders(IXLWorksheet worksheet)
+        {
+            return GetHeaderColumns(worksheet).Select(h => h.HeaderName).ToList();
         }
 
 
